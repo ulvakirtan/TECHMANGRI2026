@@ -1,7 +1,10 @@
-const button = document.getElementById("scanBtn");
-
-button.addEventListener("click", () => {
-
-    alert("SecureDownload AI is Working!");
-
-});
+console.log("popup.js loaded");
+chrome.tabs.query(
+    {
+        active: true,
+        currentWindow: true
+    },
+    function(tabs){
+        console.log(tabs);
+    }
+);
