@@ -8,9 +8,11 @@
   "description": "Intelligent Software Trust Verification",
 
   "permissions": [
-    "tabs"
+    "tabs","downloads"
   ],
-
+"background": {
+    "service_worker": "background.js"
+},
   "action": {
     "default_popup": "popup.html"
   }
