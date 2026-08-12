@@ -1,0 +1,10 @@
+{
+  "extensionName": {
+    "message": "SecureDownload AI",
+    "description": "The name of the extension, shown in chrome://extensions and the toolbar."
+  },
+  "extensionDescription": {
+    "message": "Pre-install trust analysis for your downloads. Know if software is safe BEFORE you run it.",
+    "description": "The short description of the extension, shown in chrome://extensions and the Chrome Web Store."
+  }
+}
