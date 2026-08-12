@@ -17,6 +17,10 @@ export const WEIGHTS = {
 // trustEngine.js silently produces a score out of the wrong range.
 export const WEIGHT_SUM = Object.values(WEIGHTS).reduce((a, b) => a + b, 0);
 
+if (Math.abs(WEIGHT_SUM - 1.0) > 0.0001) {
+  throw new Error(`[SecureDownload AI] Invalid weight configuration: WEIGHT_SUM is ${WEIGHT_SUM}, must equal 1.0`);
+}
+
 export const RISK_THRESHOLDS = {
   safe: 80,      // >= 80  -> Safe to Install / Visit
   caution: 50,   // 50-79  -> Proceed with Caution / Verify Official Site

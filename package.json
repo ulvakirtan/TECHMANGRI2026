@@ -1,0 +1,16 @@
+{
+  "name": "securedownload-ai",
+  "version": "1.0.0",
+  "description": "AI-powered real-time download security & verification Chrome Extension",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/trustEngine.test.js tests/recommendationEngine.test.js tests/sourceVerification.test.js tests/downloadParser.test.js tests/fileIntegrity.test.js"
+
+  },
+  "keywords": [
+    "security",
+    "chrome-extension",
+    "download-security"
+  ],
+  "license": "MIT"
+}

@@ -11,12 +11,14 @@ const SUSPICIOUS_NAME_PATTERNS = [
   /\bportable[_-]?activator\b/i
 ];
 
-export function verifyPublisher({ domain, filename, isExecutable, category }, extraTrustedDomains = []) {
-  const matchedPublisher = KNOWN_PUBLISHERS.find(p =>
+export function verifyPublisher({ domain, filename, isExecutable, category }, extraTrustedDomains = [], publisherList = KNOWN_PUBLISHERS) {
+  const activePublishers = Array.isArray(publisherList) && publisherList.length > 0 ? publisherList : KNOWN_PUBLISHERS;
+  const matchedPublisher = activePublishers.find(p =>
     p.domains.some(d => domain === d || domain.endsWith(`.${d}`))
   );
 
   const flaggedFilename = SUSPICIOUS_NAME_PATTERNS.some(rx => rx.test(filename));
+
 
   let score;
   let confidence;

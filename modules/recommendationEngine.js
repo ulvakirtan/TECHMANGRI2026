@@ -7,16 +7,26 @@ import { RISK_THRESHOLDS } from "./config.js";
 
 export function getRecommendation(trustResult, context = {}) {
   const { trustScore, safeBrowsingOverride } = trustResult;
-  const { looksLikeTyposquat, integrityStatus } = context;
+  const { looksLikeTyposquat, integrityStatus, chromeDanger } = context;
 
   if (safeBrowsingOverride) {
     return {
       riskLevel: "dangerous",
       emoji: "🔴",
       headline: "Delete Immediately",
-      detail: "Google Safe Browsing has flagged this download's source as a known threat."
+      detail: "Google Safe Browsing or browser security flagged this download as a threat."
     };
   }
+
+  if (chromeDanger && !["safe", "accepted"].includes(chromeDanger)) {
+    return {
+      riskLevel: "dangerous",
+      emoji: "🔴",
+      headline: "Delete Immediately",
+      detail: `Chrome browser protection flagged this download as hazardous (${chromeDanger}).`
+    };
+  }
+
 
   if (looksLikeTyposquat) {
     return {

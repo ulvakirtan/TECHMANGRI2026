@@ -1,11 +1,14 @@
 // modules/fileIntegrity.js
 // Module 5: File Integrity.
-// Fetches the file bytes directly from the download URL (rather than reading
-// the file back off disk, which extensions can't do) and computes a SHA-256.
-// That hash is compared against any known-good hashes the user has stored
-// (via Options, or previously cached from a VirusTotal file report).
+// Direct URL Byte Hash Engine.
+// TRADEOFF NOTE (Issue #8): WebExtensions Manifest V3 background service workers
+// cannot inspect paused download files on local disk prior to completion without
+// native messaging binaries. Thus, fileIntegrity fetches content bytes via HTTP.
+// To avoid excessive bandwidth/memory consumption, downloads larger than 200MB
+// (or exceeding Content-Length threshold) skip this check cleanly.
 
 const MAX_BYTES_TO_HASH = 200 * 1024 * 1024; // 200MB safety cap
+
 
 function bufToHex(buffer) {
   return Array.from(new Uint8Array(buffer))

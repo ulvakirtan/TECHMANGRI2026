@@ -1,7 +1,16 @@
-// popup/popup.js
-// Module 12: Popup Dashboard (behavior & presentation layer).
-
 import { WEIGHTS } from "../modules/config.js";
+import { getHistory, getStats } from "../modules/storageManager.js";
+
+function escapeHtml(str) {
+  if (typeof str !== "string") return "";
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 
 const FACTOR_META = [
   { key: "officialWebsite", label: "Official Website", from: (r) => r.details.source.officialWebsiteScore, applicable: () => true },
@@ -328,7 +337,7 @@ async function triggerActiveTabScan() {
   if (res && res.audit) {
     renderWebsiteSecurity(res.audit);
   } else if (res && res.error) {
-    els.vulnList.innerHTML = `<p class="empty-sub text-center" style="padding:16px;color:var(--accent-warn)">${res.error}</p>`;
+    els.vulnList.innerHTML = `<p class="empty-sub text-center" style="padding:16px;color:var(--accent-warn)">${escapeHtml(res.error)}</p>`;
   }
 }
 
@@ -378,19 +387,19 @@ function renderWebsiteSecurity(audit) {
 
   for (const v of vulns) {
     const card = document.createElement("div");
-    const threatClass = `level-${(v.threatLevel || "medium").toLowerCase()}`;
+    const threatClass = `level-${escapeHtml((v.threatLevel || "medium").toLowerCase())}`;
 
-    const owaspTag = v.owaspCategory ? `<div class="owasp-badge">${v.owaspCategory}</div>` : "";
+    const owaspTag = v.owaspCategory ? `<div class="owasp-badge">${escapeHtml(v.owaspCategory)}</div>` : "";
     card.className = "vuln-card";
     card.innerHTML = `
       <div class="vuln-header">
-        <span class="v-title">${v.title}</span>
-        <span class="threat-tag ${threatClass}">${v.threatLevel.toUpperCase()} THREAT</span>
+        <span class="v-title">${escapeHtml(v.title)}</span>
+        <span class="threat-tag ${threatClass}">${escapeHtml(v.threatLevel.toUpperCase())} THREAT</span>
       </div>
       ${owaspTag}
       <div class="harm-box">
         <span class="harm-title">Unethical Harm & Exploit Risk</span>
-        <p class="v-harm">${v.unethicalHarm}</p>
+        <p class="v-harm">${escapeHtml(v.unethicalHarm)}</p>
       </div>
     `;
     els.vulnList.appendChild(card);
@@ -415,20 +424,6 @@ async function resolveCurrent(action) {
   renderStatsLine();
 }
 
-async function getHistory() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("sd_history", (data) => resolve(data.sd_history || []));
-  });
-}
-
-async function getStats() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("sd_stats", (data) =>
-      resolve(data.sd_stats || { totalScanned: 0, safe: 0, warning: 0, dangerous: 0, filesBlocked: 0 })
-    );
-  });
-}
-
 async function renderStatsLine() {
   const stats = await getStats();
   els.statsLine.textContent = `${stats.totalScanned} scanned · ${stats.filesBlocked} blocked`;
@@ -446,8 +441,8 @@ async function renderHistoryView() {
       const badgeColor = scoreColor(record.trustScore);
       item.innerHTML = `
         <div class="h-meta">
-          <span class="h-name" title="${record.filename}">${record.filename}</span>
-          <span class="h-sub">${record.domain} · ${(record.extension || "file").toUpperCase()}</span>
+          <span class="h-name" title="${escapeHtml(record.filename)}">${escapeHtml(record.filename)}</span>
+          <span class="h-sub">${escapeHtml(record.domain)} · ${escapeHtml((record.extension || "file").toUpperCase())}</span>
         </div>
         <span class="h-score-badge" style="background:${badgeColor}20;color:${badgeColor};border:1px solid ${badgeColor}40">${record.trustScore}</span>
       `;
@@ -459,6 +454,7 @@ async function renderHistoryView() {
     }
   }
 }
+
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "SD_ANALYSIS_COMPLETE") {

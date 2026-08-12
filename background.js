@@ -9,7 +9,8 @@ import { checkVirusTotal, checkSafeBrowsing } from "./modules/threatIntelligence
 import { checkVulnerabilities } from "./modules/vulnerabilityIntelligence.js";
 import { calculateTrustScore } from "./modules/trustEngine.js";
 import { getRecommendation } from "./modules/recommendationEngine.js";
-import { saveScanRecord, getSettings, getCached, setCached } from "./modules/storageManager.js";
+import { saveScanRecord, getSettings, getCached, setCached, getPublisherList } from "./modules/storageManager.js";
+
 import { notifyResult } from "./modules/notificationEngine.js";
 import { CACHE_TTL_MS } from "./modules/config.js";
 
@@ -45,8 +46,20 @@ chrome.downloads.onCreated.addListener(async (item) => {
 
   runAnalysisPipeline(parsed, settings)
     .then(() => console.log("[SecureDownload AI] pipeline complete for", parsed.filename))
-    .catch((err) => {
-      console.error("SecureDownload AI: pipeline failed", err);
+    .catch(async (err) => {
+      console.error("[SecureDownload AI] pipeline failed", err);
+      try {
+        await chrome.downloads.resume(item.id);
+      } catch (resumeErr) {
+        console.warn("[SecureDownload AI] could not resume download after failure:", resumeErr);
+      }
+      chrome.notifications.create(`sd_err_${item.id}`, {
+        type: "basic",
+        iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+        title: "⚠️ Security Audit Failure",
+        message: `Download resumed unscanned: ${parsed.filename || "file"}.\nError: ${err.message || String(err)}`,
+        priority: 1
+      });
     });
 });
 
@@ -55,13 +68,19 @@ async function runAnalysisPipeline(parsed, settings) {
   const headers = await fetchSiteHeaders(parsed.url);
   const websiteSecurity = analyzeWebsiteVulnerabilities(parsed.url, headers, settings.extraTrustedDomains);
 
-  const [sourceResult, httpsResult, publisherResult, integrityResult, vtResult, sbResult, vulnResult] =
+  // Run integrity check first so computed sha256 hash is passed to VirusTotal (Issue #4)
+  const integrityResult = await checkFileIntegrity(parsed.url, settings.knownGoodHashes, parsed.filename);
+  const vtKeyMaterial = integrityResult.sha256 || parsed.url;
+
+  const publisherList = await getPublisherList();
+
+  const [sourceResult, httpsResult, publisherResult, vtResult, sbResult, vulnResult] =
     await Promise.all([
       Promise.resolve(verifySource(parsed.domain, settings.extraTrustedDomains)),
       Promise.resolve(verifyHttps(parsed.url)),
-      Promise.resolve(verifyPublisher(parsed, settings.extraTrustedDomains)),
-      checkFileIntegrity(parsed.url, settings.knownGoodHashes, parsed.filename),
-      cachedThreatCheck("vt", parsed.url, () => checkVirusTotal({ url: parsed.url }, settings.virusTotalApiKey)),
+      Promise.resolve(verifyPublisher(parsed, settings.extraTrustedDomains, publisherList)),
+
+      cachedThreatCheck("vt", vtKeyMaterial, () => checkVirusTotal({ url: parsed.url, sha256: integrityResult.sha256 }, settings.virusTotalApiKey)),
       cachedThreatCheck("sb", parsed.url, () => checkSafeBrowsing(parsed.url, settings.safeBrowsingApiKey)),
       cachedThreatCheck("nvd", parsed.filename, () => checkVulnerabilities(parsed.filename, settings.nvdApiKey))
     ]);
@@ -77,12 +96,14 @@ async function runAnalysisPipeline(parsed, settings) {
     integrityScore: integrityResult.integrityScore,
     integrityApplicable: ["matches_known_good", "hash_mismatch_possible_tampering"].includes(integrityResult.status),
     sourceReputationScore: sourceResult.sourceReputationScore,
-    safeBrowsingFlagged: sbResult.flagged
+    safeBrowsingFlagged: sbResult.flagged,
+    chromeDanger: parsed.danger
   });
 
   const recommendation = getRecommendation(trustResult, {
     looksLikeTyposquat: sourceResult.looksLikeTyposquat,
-    integrityStatus: integrityResult.status
+    integrityStatus: integrityResult.status,
+    chromeDanger: parsed.danger
   });
 
   const record = {
@@ -113,9 +134,8 @@ async function runAnalysisPipeline(parsed, settings) {
     action: "pending"
   };
 
-  const isSafe = recommendation.riskLevel === "safe" || trustResult.trustScore >= 80;
+  const isSafe = recommendation.riskLevel === "safe";
   let autoResumed = false;
-
 
   if (isSafe) {
     try {
@@ -140,13 +160,20 @@ async function runAnalysisPipeline(parsed, settings) {
   chrome.runtime.sendMessage({ type: "SD_ANALYSIS_COMPLETE", record, autoResumed }).catch(() => {});
 }
 
-
 async function fetchSiteHeaders(url) {
   try {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(url, { method: "HEAD", signal: controller.signal });
+    let res = await fetch(url, { method: "HEAD", signal: controller.signal });
     clearTimeout(id);
+
+    if (!res.ok || Array.from(res.headers.keys()).length === 0) {
+      const getController = new AbortController();
+      const getId = setTimeout(() => getController.abort(), 4000);
+      res = await fetch(url, { method: "GET", headers: { Range: "bytes=0-0" }, signal: getController.signal });
+      clearTimeout(getId);
+    }
+
     const headers = {};
     for (const [k, v] of res.headers.entries()) {
       headers[k.toLowerCase()] = v;
@@ -157,6 +184,7 @@ async function fetchSiteHeaders(url) {
     return {};
   }
 }
+
 
 async function cachedThreatCheck(prefix, keyMaterial, fn) {
   const cacheKey = `${prefix}:${keyMaterial}`;

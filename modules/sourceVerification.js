@@ -5,7 +5,16 @@ import { KNOWN_PUBLISHERS, VULNERABILITY_DEFINITIONS } from "./config.js";
 
 const SUSPICIOUS_TLDS = new Set(["top", "xyz", "cc", "click", "download", "link", "gq", "work", "cf", "tk", "ml", "ga"]);
 
-function levenshtein(a, b) {
+const levenshteinCache = new Map();
+
+export function levenshtein(a, b) {
+  if (a === b) return 0;
+  const lenDiff = Math.abs(a.length - b.length);
+  if (lenDiff > 2) return lenDiff;
+
+  const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+  if (levenshteinCache.has(key)) return levenshteinCache.get(key);
+
   const dp = Array.from({ length: a.length + 1 }, (_, i) =>
     Array(b.length + 1).fill(0).map((_, j) => (i === 0 ? j : 0))
   );
@@ -18,8 +27,13 @@ function levenshtein(a, b) {
         : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
     }
   }
-  return dp[a.length][b.length];
+  const result = dp[a.length][b.length];
+  if (levenshteinCache.size < 5000) {
+    levenshteinCache.set(key, result);
+  }
+  return result;
 }
+
 
 function registrableDomain(hostname) {
   const parts = hostname.split(".");

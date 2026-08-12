@@ -72,18 +72,20 @@ export function calculateTrustScore(scores) {
     total += contribution;
   }
 
-  // Safe Browsing acts as a hard override rather than a weighted input:
-  // a confirmed match is unambiguous ground truth from Google, so no
-  // amount of "clean" signal elsewhere should be able to outvote it.
-  const overridden = scores.safeBrowsingFlagged === true;
+  // Safe Browsing or Chrome built-in threat detection acts as a hard override:
+  // confirmed flags are unambiguous ground truth.
+  const chromeDangerFlagged = Boolean(scores.chromeDanger && !["safe", "accepted"].includes(scores.chromeDanger));
+  const overridden = scores.safeBrowsingFlagged === true || chromeDangerFlagged;
   const finalScore = overridden ? Math.min(total, 10) : total;
 
   return {
     trustScore: Math.round(Math.max(0, Math.min(100, finalScore))),
     rawWeightedScore: Math.round(total),
     safeBrowsingOverride: overridden,
+    chromeDangerFlagged,
     checksApplicable: Object.values(factors).filter((f) => f.applicable).length,
     checksTotal: Object.keys(factors).length,
     contributions
   };
+
 }
