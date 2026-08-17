@@ -36,6 +36,7 @@ export function calculateTrustScore(scores) {
     officialWebsite: { score: scores.officialWebsiteScore, applicable: true },
     publisherVerification: { score: scores.publisherVerificationScore, applicable: true },
     virusTotal: { score: scores.vtScore, applicable: scores.vtApplicable !== false },
+    staticAnalysis: { score: scores.staticAnalysisScore, applicable: scores.staticAnalysisApplicable !== false },
     vulnerability: { score: scores.vulnerabilityScore, applicable: scores.vulnerabilityApplicable !== false },
     https: { score: scores.httpsScore, applicable: true },
     fileIntegrity: { score: scores.integrityScore, applicable: scores.integrityApplicable !== false },

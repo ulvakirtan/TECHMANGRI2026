@@ -1,5 +1,6 @@
 import { WEIGHTS } from "../modules/config.js";
-import { getHistory, getStats } from "../modules/storageManager.js";
+import { getHistory, getStats, getEmailHistory } from "../modules/storageManager.js";
+import { isGmailConnected } from "../modules/emailAuth.js";
 
 function escapeHtml(str) {
   if (typeof str !== "string") return "";
@@ -16,6 +17,7 @@ const FACTOR_META = [
   { key: "officialWebsite", label: "Official Website", from: (r) => r.details.source.officialWebsiteScore, applicable: () => true },
   { key: "publisherVerification", label: "Publisher Trust", from: (r) => r.details.publisher.publisherVerificationScore, applicable: () => true },
   { key: "virusTotal", label: "VirusTotal", from: (r) => r.details.virusTotal.vtScore, applicable: (r) => r.details.virusTotal.status !== "not_configured" },
+  { key: "staticAnalysis", label: "Byte-Level Scan", from: (r) => r.details.staticAnalysis.staticAnalysisScore, applicable: (r) => r.details.staticAnalysis && r.details.staticAnalysis.status !== "no_content" },
   { key: "vulnerability", label: "Vulnerabilities", from: (r) => r.details.vulnerability.vulnerabilityScore, applicable: (r) => !["no_version_detected", "error"].includes(r.details.vulnerability.status) },
   { key: "https", label: "HTTPS Security", from: (r) => r.details.https.httpsScore, applicable: () => true },
   { key: "fileIntegrity", label: "File Integrity", from: (r) => r.details.integrity.integrityScore, applicable: (r) => ["matches_known_good", "hash_mismatch_possible_tampering"].includes(r.details.integrity.status) },
@@ -33,11 +35,13 @@ const els = {
   tabDownload: document.getElementById("tabDownload"),
   tabWebsite: document.getElementById("tabWebsite"),
   tabHistory: document.getElementById("tabHistory"),
+  tabEmail: document.getElementById("tabEmail"),
 
   // Views
   downloadView: document.getElementById("downloadView"),
   websiteView: document.getElementById("websiteView"),
   historyPanel: document.getElementById("historyPanel"),
+  emailPanel: document.getElementById("emailPanel"),
 
   // Download view elements
   emptyState: document.getElementById("emptyState"),
@@ -82,7 +86,13 @@ const els = {
   // History & Footer
   historyList: document.getElementById("historyList"),
   statsLine: document.getElementById("statsLine"),
-  optionsBtn: document.getElementById("optionsBtn")
+  optionsBtn: document.getElementById("optionsBtn"),
+
+  // Email panel
+  emailScanNowBtn: document.getElementById("emailScanNowBtn"),
+  emailScanBtnText: document.getElementById("emailScanBtnText"),
+  emailConnectionStatus: document.getElementById("emailConnectionStatus"),
+  emailHistoryList: document.getElementById("emailHistoryList")
 };
 
 let currentRecord = null;
@@ -131,6 +141,10 @@ function wireTabsAndButtons() {
     switchTab("history");
     renderHistoryView();
   });
+  els.tabEmail.addEventListener("click", () => {
+    switchTab("email");
+    renderEmailView();
+  });
 
   els.scanActiveTabBtn.addEventListener("click", triggerActiveTabScan);
   els.resumeBtn.addEventListener("click", () => resolveCurrent("resumed"));
@@ -138,16 +152,85 @@ function wireTabsAndButtons() {
   els.detailsBtn.addEventListener("click", () => {
     if (currentRecord) chrome.downloads.show(currentRecord.downloadId);
   });
+  els.emailScanNowBtn.addEventListener("click", triggerEmailScanNow);
 }
 
 function switchTab(target) {
   els.tabDownload.classList.toggle("active", target === "download");
   els.tabWebsite.classList.toggle("active", target === "website");
   els.tabHistory.classList.toggle("active", target === "history");
+  els.tabEmail.classList.toggle("active", target === "email");
 
   els.downloadView.classList.toggle("hidden", target !== "download");
   els.websiteView.classList.toggle("hidden", target !== "website");
   els.historyPanel.classList.toggle("hidden", target !== "history");
+  els.emailPanel.classList.toggle("hidden", target !== "email");
+}
+
+async function renderEmailView() {
+  const connected = await isGmailConnected();
+  els.emailConnectionStatus.textContent = connected
+    ? "Gmail connected — scanning recent inbox mail."
+    : "Gmail not connected. Open Settings to connect your account.";
+  await renderEmailHistoryView();
+}
+
+async function triggerEmailScanNow() {
+  els.emailScanBtnText.textContent = "Scanning…";
+  const result = await chrome.runtime.sendMessage({ type: "SD_EMAIL_SCAN_NOW" }).catch(() => null);
+  els.emailScanBtnText.textContent = "Scan Inbox Now";
+
+  if (result?.error === "not_connected") {
+    els.emailConnectionStatus.textContent = "Gmail not connected. Open Settings to connect your account.";
+  } else {
+    await renderEmailHistoryView();
+  }
+}
+
+async function renderEmailHistoryView() {
+  const history = await getEmailHistory();
+  els.emailHistoryList.textContent = "";
+
+  if (!history.length) {
+    const emptyNotice = document.createElement("p");
+    emptyNotice.className = "empty-sub text-center";
+    emptyNotice.style.padding = "16px";
+    emptyNotice.textContent = "No emails scanned yet.";
+    els.emailHistoryList.appendChild(emptyNotice);
+    return;
+  }
+
+  for (const record of history) {
+    const item = document.createElement("div");
+    item.className = "history-item";
+
+    const meta = document.createElement("div");
+    meta.className = "h-meta";
+
+    const name = document.createElement("span");
+    name.className = "h-name";
+    name.textContent = record.subject || "(no subject)";
+    name.title = record.subject || "";
+
+    const sub = document.createElement("span");
+    sub.className = "h-sub";
+    sub.textContent = `${record.senderDomain || "unknown"} · ${record.riskLevel}`;
+
+    meta.appendChild(name);
+    meta.appendChild(sub);
+
+    const badge = document.createElement("span");
+    badge.className = "h-score-badge";
+    const badgeColor = scoreColor(record.emailTrustScore);
+    badge.style.background = `${badgeColor}20`;
+    badge.style.color = badgeColor;
+    badge.style.border = `1px solid ${badgeColor}40`;
+    badge.textContent = `${record.emailTrustScore}`;
+
+    item.appendChild(meta);
+    item.appendChild(badge);
+    els.emailHistoryList.appendChild(item);
+  }
 }
 
 function renderResult(record, { readOnly = false } = {}) {
@@ -326,6 +409,15 @@ function renderFactors(record) {
     note.className = "factor-note";
     note.textContent = `Score reflects ${checksApplicable} of ${checksTotal} checks. Configure API keys in Settings to enable VirusTotal & Safe Browsing checks.`;
     els.factorList.appendChild(note);
+  }
+
+  const staticFindings = record.details?.staticAnalysis?.findings || [];
+  if (staticFindings.length) {
+    const box = document.createElement("div");
+    box.className = "factor-note";
+    box.innerHTML = `<strong>Byte-level scan findings:</strong><br>` +
+      staticFindings.map(f => `• ${escapeHtml(f.label)}`).join("<br>");
+    els.factorList.appendChild(box);
   }
 }
 

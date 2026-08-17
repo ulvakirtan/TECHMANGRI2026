@@ -32,3 +32,20 @@ export function notifyResult(record, autoResumed = false) {
   });
 }
 
+// Only fires for emails that scored "dangerous" — suspicious-but-not-clearly-
+// phishing mail is left for the popup's Email tab rather than interrupting
+// the user for every borderline message.
+export function notifyEmailResult(emailRecord) {
+  const { subject, senderDomain, findings } = emailRecord;
+  const topFinding = findings[0]?.label || "Multiple phishing indicators detected";
+
+  chrome.notifications.create(`sd_email_${emailRecord.messageId}`, {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+    title: "🎣 Suspected Phishing Email",
+    message: `From ${senderDomain}: "${subject}"\n${topFinding}`,
+    priority: 2,
+    buttons: [{ title: "View in Email Tab" }]
+  });
+}
+

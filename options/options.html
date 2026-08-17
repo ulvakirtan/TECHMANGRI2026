@@ -37,6 +37,22 @@
     </section>
 
     <section class="card">
+      <h2>Deep File Scanning</h2>
+      <label class="row">
+        <input type="checkbox" id="allowVtUpload" />
+        <span>Submit unrecognized files to VirusTotal for a fresh multi-engine scan</span>
+      </label>
+      <p class="hint">
+        By default, a file VirusTotal hasn't seen before gets a neutral score — it's only checked
+        against a hash cache, not actually scanned. Turning this on sends the file's <strong>actual
+        content</strong> (not just its hash) to VirusTotal when it's unrecognized and under 32MB.
+        This is a real privacy tradeoff — off by default. Local static analysis (file-signature,
+        entropy, macro, and script checks) always runs regardless of this setting and never leaves
+        your device.
+      </p>
+    </section>
+
+    <section class="card">
       <h2>Behavior</h2>
       <label class="row">
         <input type="checkbox" id="autoAnalyze" />
@@ -58,6 +74,37 @@
       <h2>Known-Good File Hashes</h2>
       <p class="hint">One per line, format <code>filename.exe = sha256hash</code>. Used for the File Integrity check.</p>
       <textarea id="knownHashes" rows="4" placeholder="setup.exe = 3a7bd3e2360a3d..."></textarea>
+    </section>
+
+    <section class="card">
+      <h2>Email Security (Gmail — read-only)</h2>
+      <p class="hint">
+        Connects with the <code>gmail.readonly</code> scope only — never send, modify, or delete.
+        One-time setup (only needed once, not per person using this build):
+      </p>
+      <ol class="hint" style="padding-left: 18px; margin-top: 4px;">
+        <li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>, create an OAuth 2.0 Client ID of type "Chrome Extension", using this extension's ID (shown on its card in <code>chrome://extensions</code>) as the item ID.</li>
+        <li>Enable the Gmail API for that project.</li>
+        <li>Paste the Client ID into <code>manifest.json</code>'s <code>oauth2.client_id</code> field and reload the extension.</li>
+      </ol>
+      <p class="hint">After that, connecting is just the button below — no ID to paste here.</p>
+
+      <div class="row" style="gap: 8px; margin-top: 8px;">
+        <button id="connectGmailBtn" class="save-btn" type="button" style="width: auto;">Connect Gmail</button>
+        <button id="disconnectGmailBtn" class="save-btn" type="button" style="width: auto; background:#374151;">Disconnect</button>
+      </div>
+      <p id="gmailStatus" class="hint"></p>
+
+      <label class="row" style="margin-top: 12px;">
+        <input type="checkbox" id="emailScanEnabled" />
+        <span>Automatically scan recent inbox mail for phishing indicators</span>
+      </label>
+
+      <label for="emailScanInterval">Scan interval (minutes)</label>
+      <input id="emailScanInterval" type="number" min="5" step="5" style="max-width: 120px;" />
+
+      <label for="emailMaxMessages">Messages per scan</label>
+      <input id="emailMaxMessages" type="number" min="1" max="100" style="max-width: 120px;" />
     </section>
 
     <button id="saveBtn" class="save-btn">Save Settings</button>

@@ -4,12 +4,13 @@
 // (API keys, extra trusted domains) lives in chrome.storage, not this file.
 
 export const WEIGHTS = {
-  officialWebsite: 0.20,
-  publisherVerification: 0.20,
-  virusTotal: 0.20,
-  vulnerability: 0.15,
-  https: 0.10,
-  fileIntegrity: 0.10,
+  officialWebsite: 0.17,
+  publisherVerification: 0.17,
+  virusTotal: 0.18,        // hash lookup OR, when opted in, a real fresh-scan result
+  staticAnalysis: 0.12,    // local magic-byte / entropy / macro / script-pattern checks
+  vulnerability: 0.11,
+  https: 0.08,
+  fileIntegrity: 0.12,     // known-good hash match, when a reference hash exists
   sourceReputation: 0.05
 };
 
@@ -228,9 +229,68 @@ export const VULNERABILITY_DEFINITIONS = {
 export const ENDPOINTS = {
   virusTotalUrlReport: "https://www.virustotal.com/api/v3/urls",
   virusTotalFileReport: "https://www.virustotal.com/api/v3/files",
+  virusTotalFileUpload: "https://www.virustotal.com/api/v3/files",
+  virusTotalAnalysis: "https://www.virustotal.com/api/v3/analyses",
   safeBrowsing: "https://safebrowsing.googleapis.com/v4/threatMatches:find",
-  nvdCves: "https://services.nvd.nist.gov/rest/json/cves/2.0"
+  nvdCves: "https://services.nvd.nist.gov/rest/json/cves/2.0",
+  gmailMessages: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+  gmailProfile: "https://gmail.googleapis.com/gmail/v1/users/me/profile"
 };
+
+// VirusTotal free-tier constraints. Uploading is opt-in (see settings.allowVirusTotalUpload)
+// because, unlike a hash lookup, it sends the actual file bytes to a third party.
+export const VT_UPLOAD_MAX_BYTES = 32 * 1024 * 1024; // 32MB free-tier ceiling
+export const VT_ANALYSIS_POLL_MS = 4000;
+export const VT_ANALYSIS_MAX_POLLS = 15; // ~60s ceiling before giving up and reporting "pending"
+
+// File signature ("magic bytes") table for detecting extension spoofing —
+// e.g. an .exe renamed to .pdf. Values are hex-encoded byte prefixes.
+export const FILE_SIGNATURES = [
+  { hex: "4d5a", type: "pe_executable", categories: ["executable"] },              // MZ
+  { hex: "7f454c46", type: "elf_executable", categories: ["executable"] },          // .ELF
+  { hex: "cafebabe", type: "macho_or_java_class", categories: ["executable", "code"] },
+  { hex: "25504446", type: "pdf", categories: ["document"] },                       // %PDF
+  { hex: "504b0304", type: "zip_based", categories: ["archive", "document", "executable"] }, // PK.. (zip, docx, jar, apk...)
+  { hex: "526172211a0700", type: "rar", categories: ["archive"] },
+  { hex: "377abcaf271c", type: "7z", categories: ["archive"] },
+  { hex: "89504e47", type: "png", categories: ["media"] },
+  { hex: "ffd8ff", type: "jpeg", categories: ["media"] },
+  { hex: "d0cf11e0a1b11ae1", type: "ole_compound", categories: ["document"] }        // old .doc/.xls (also carries VBA macros)
+];
+
+// Text patterns worth flagging inside script files — not proof of malice on
+// their own, but each is a real technique used by download-and-execute /
+// obfuscated malware loaders, and near-never appears in ordinary scripts.
+export const SUSPICIOUS_SCRIPT_PATTERNS = [
+  { key: "PS_ENCODED_COMMAND", rx: /-e(nc(odedcommand)?)?\s+[A-Za-z0-9+/=]{40,}/i, label: "PowerShell -EncodedCommand with a large Base64 blob" },
+  { key: "PS_DOWNLOAD_EXEC", rx: /(new-object\s+net\.webclient|invoke-webrequest|iwr\s).{0,80}(downloadstring|downloadfile|\.exe)/i, label: "PowerShell download-and-execute pattern" },
+  { key: "PS_IEX", rx: /iex\s*\(/i, label: "PowerShell Invoke-Expression on dynamic content" },
+  { key: "JS_EVAL_ATOB", rx: /eval\s*\(\s*atob\s*\(/i, label: "JavaScript eval() of a decoded Base64 string" },
+  { key: "VBS_SHELL_EXEC", rx: /(wscript\.shell|createobject\(["']wscript\.shell["']\))/i, label: "VBScript shell execution object" },
+  { key: "CURL_PIPE_SH", rx: /(curl|wget)\s+.{0,80}\|\s*(sh|bash)/i, label: "Download-piped-to-shell pattern" }
+];
+
+// Static-analysis entropy threshold. Shannon entropy above this on a file
+// whose extension implies plain text/structured content (script, document,
+// code) suggests packed, encrypted, or obfuscated payload content.
+export const HIGH_ENTROPY_THRESHOLD = 7.2; // bits/byte, max is 8.0
+
+export const STATIC_ANALYSIS_MAX_BYTES = 25 * 1024 * 1024; // cap the JS-side scan cost
+
+// Gmail readonly scope — least privilege that still lets us read message
+// content for phishing analysis. Never request modify/send scopes.
+export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+
+export const PHISHING_URGENCY_PATTERNS = [
+  /verify your (account|identity|password)/i,
+  /account (has been |will be )?(suspended|locked|limited|disabled)/i,
+  /(click|log ?in|sign ?in) (here|now|immediately)/i,
+  /unusual (sign-?in|activity|login) (attempt|detected)/i,
+  /your (payment|invoice|order) (failed|is overdue|could not be processed)/i,
+  /confirm your (payment|billing|card) details/i,
+  /you have (won|been selected)/i,
+  /act now|urgent action required|final notice/i
+];
 
 export const CACHE_TTL_MS = {
   virusTotal: 1000 * 60 * 60 * 6,   // 6 hours

@@ -9,6 +9,10 @@
 
 const MAX_BYTES_TO_HASH = 200 * 1024 * 1024; // 200MB safety cap
 
+// Guards against a stalled/hanging connection, not against legitimately
+// slow large-file transfers — 200MB caps mean this needs real headroom,
+// unlike the much shorter timeout used for the lightweight header probe.
+const FETCH_TIMEOUT_MS = 60_000;
 
 function bufToHex(buffer) {
   return Array.from(new Uint8Array(buffer))
@@ -22,15 +26,17 @@ function bufToHex(buffer) {
  * @param {string} filename
  */
 export async function checkFileIntegrity(url, knownGoodHashes = {}, filename = "") {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { credentials: "omit" });
+    const response = await fetch(url, { credentials: "omit", signal: controller.signal });
     if (!response.ok) {
-      return { integrityScore: 50, status: "fetch_failed", sha256: null };
+      return { integrityScore: 50, status: "fetch_failed", sha256: null, buffer: null };
     }
 
     const contentLength = Number(response.headers.get("content-length") || 0);
     if (contentLength > MAX_BYTES_TO_HASH) {
-      return { integrityScore: 60, status: "skipped_too_large", sha256: null };
+      return { integrityScore: 60, status: "skipped_too_large", sha256: null, buffer: null };
     }
 
     const buffer = await response.arrayBuffer();
@@ -39,7 +45,10 @@ export async function checkFileIntegrity(url, knownGoodHashes = {}, filename = "
 
     const expected = knownGoodHashes[filename.toLowerCase()];
     if (!expected) {
-      return { integrityScore: 55, status: "no_reference_hash", sha256 };
+      // NOTE: `buffer` is returned so the caller (background.js) can run
+      // static analysis and, if the user opted in, a VirusTotal upload scan
+      // — all from these same already-fetched bytes, no second download.
+      return { integrityScore: 55, status: "no_reference_hash", sha256, buffer };
     }
 
     const matches = expected.toLowerCase() === sha256.toLowerCase();
@@ -47,9 +56,13 @@ export async function checkFileIntegrity(url, knownGoodHashes = {}, filename = "
       integrityScore: matches ? 100 : 0,
       status: matches ? "matches_known_good" : "hash_mismatch_possible_tampering",
       sha256,
-      expectedHash: expected
+      expectedHash: expected,
+      buffer
     };
   } catch (err) {
-    return { integrityScore: 50, status: "error", error: String(err), sha256: null };
+    const status = err?.name === "AbortError" ? "timed_out" : "error";
+    return { integrityScore: 50, status, error: String(err), sha256: null, buffer: null };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

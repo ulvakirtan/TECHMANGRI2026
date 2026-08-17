@@ -1,6 +1,7 @@
 // options/options.js
 
 import { getSettings, saveSettings } from "../modules/storageManager.js";
+import { connectGmail, disconnectGmail, isGmailConnected } from "../modules/emailAuth.js";
 
 const els = {
   vtKey: document.getElementById("vtKey"),
@@ -8,10 +9,18 @@ const els = {
   nvdKey: document.getElementById("nvdKey"),
   autoAnalyze: document.getElementById("autoAnalyze"),
   blockDangerous: document.getElementById("blockDangerous"),
+  allowVtUpload: document.getElementById("allowVtUpload"),
   trustedDomains: document.getElementById("trustedDomains"),
   knownHashes: document.getElementById("knownHashes"),
   saveBtn: document.getElementById("saveBtn"),
-  savedMsg: document.getElementById("savedMsg")
+  savedMsg: document.getElementById("savedMsg"),
+
+  connectGmailBtn: document.getElementById("connectGmailBtn"),
+  disconnectGmailBtn: document.getElementById("disconnectGmailBtn"),
+  gmailStatus: document.getElementById("gmailStatus"),
+  emailScanEnabled: document.getElementById("emailScanEnabled"),
+  emailScanInterval: document.getElementById("emailScanInterval"),
+  emailMaxMessages: document.getElementById("emailMaxMessages")
 };
 
 init();
@@ -23,12 +32,46 @@ async function init() {
   els.nvdKey.value = settings.nvdApiKey || "";
   els.autoAnalyze.checked = settings.autoAnalyze !== false;
   els.blockDangerous.checked = Boolean(settings.blockDangerousByDefault);
+  els.allowVtUpload.checked = Boolean(settings.allowVirusTotalUpload);
   els.trustedDomains.value = (settings.extraTrustedDomains || []).join("\n");
   els.knownHashes.value = Object.entries(settings.knownGoodHashes || {})
     .map(([name, hash]) => `${name} = ${hash}`)
     .join("\n");
 
+  els.emailScanEnabled.checked = Boolean(settings.emailScanEnabled);
+  els.emailScanInterval.value = settings.emailScanIntervalMinutes || 15;
+  els.emailMaxMessages.value = settings.emailMaxMessagesPerScan || 25;
+
   els.saveBtn.addEventListener("click", onSave);
+  els.connectGmailBtn.addEventListener("click", onConnectGmail);
+  els.disconnectGmailBtn.addEventListener("click", onDisconnectGmail);
+
+  await refreshGmailStatus();
+}
+
+async function refreshGmailStatus() {
+  const connected = await isGmailConnected();
+  els.gmailStatus.textContent = connected
+    ? "✅ Gmail connected — read-only access."
+    : "Not connected. Click Connect and choose your Google account.";
+}
+
+async function onConnectGmail() {
+  els.connectGmailBtn.disabled = true;
+  els.gmailStatus.textContent = "Opening Google sign-in…";
+  const result = await connectGmail();
+  els.connectGmailBtn.disabled = false;
+
+  if (result.ok) {
+    await refreshGmailStatus();
+  } else {
+    els.gmailStatus.textContent = `❌ ${result.error}`;
+  }
+}
+
+async function onDisconnectGmail() {
+  await disconnectGmail();
+  await refreshGmailStatus();
 }
 
 async function onSave() {
@@ -49,8 +92,12 @@ async function onSave() {
     nvdApiKey: els.nvdKey.value.trim(),
     autoAnalyze: els.autoAnalyze.checked,
     blockDangerousByDefault: els.blockDangerous.checked,
+    allowVirusTotalUpload: els.allowVtUpload.checked,
     extraTrustedDomains,
-    knownGoodHashes
+    knownGoodHashes,
+    emailScanEnabled: els.emailScanEnabled.checked,
+    emailScanIntervalMinutes: Math.max(5, Number(els.emailScanInterval.value) || 15),
+    emailMaxMessagesPerScan: Math.min(100, Math.max(1, Number(els.emailMaxMessages.value) || 25))
   });
 
   els.savedMsg.classList.remove("hidden");

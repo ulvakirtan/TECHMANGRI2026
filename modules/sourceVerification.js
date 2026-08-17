@@ -194,7 +194,13 @@ export function analyzeWebsiteVulnerabilities(url, headers = {}, extraTrustedDom
   if (!xfo && !hasFrameAncestors) score -= 10;
   if (!xcto) score -= 5;
   if (SUSPICIOUS_TLDS.has(tld)) score -= 15;
-  if (sourceCheck.isKnownOfficial) score = Math.max(score, 85); // Official brands maintain baseline
+  // Being a known-official domain is a modest credibility bonus, not a
+  // floor — it must never mask an actually-misconfigured official site.
+  // (Previously `score = Math.max(score, 85)` here, which meant a known
+  // domain with every security header missing still reported as "85/100
+  // secure" — domain identity and current header hygiene are different
+  // signals and shouldn't be conflated.)
+  if (sourceCheck.isKnownOfficial) score += 10;
 
   score = Math.max(0, Math.min(100, Math.round(score)));
 

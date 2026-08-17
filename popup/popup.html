@@ -51,6 +51,13 @@
         </svg>
         <span>History</span>
       </button>
+      <button id="tabEmail" class="tab-btn">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4h16v16H4z"/>
+          <polyline points="22,6 12,13 2,6"/>
+        </svg>
+        <span>Email</span>
+      </button>
     </nav>
 
     <main id="mainContent">
@@ -222,6 +229,24 @@
           <span>Scan Audit History</span>
         </div>
         <div id="historyList" class="history-list"></div>
+      </section>
+
+      <!-- View 4: Email Security Panel -->
+      <section id="emailPanel" class="view-panel hidden">
+        <div class="active-tab-bar">
+          <button id="emailScanNowBtn" class="btn btn-secondary w-full">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 4h16v16H4z"/>
+              <polyline points="22,6 12,13 2,6"/>
+            </svg>
+            <span id="emailScanBtnText">Scan Inbox Now</span>
+          </button>
+        </div>
+        <p id="emailConnectionStatus" class="empty-sub text-center" style="padding: 8px 16px;"></p>
+        <div class="history-header">
+          <span>Email Scan History</span>
+        </div>
+        <div id="emailHistoryList" class="history-list"></div>
       </section>
 
     </main>

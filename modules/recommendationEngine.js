@@ -7,7 +7,7 @@ import { RISK_THRESHOLDS } from "./config.js";
 
 export function getRecommendation(trustResult, context = {}) {
   const { trustScore, safeBrowsingOverride } = trustResult;
-  const { looksLikeTyposquat, integrityStatus, chromeDanger } = context;
+  const { looksLikeTyposquat, integrityStatus, chromeDanger, staticAnalysisCritical, staticAnalysisFindings } = context;
 
   if (safeBrowsingOverride) {
     return {
@@ -43,6 +43,18 @@ export function getRecommendation(trustResult, context = {}) {
       emoji: "🔴",
       headline: "Delete Immediately",
       detail: "The file's hash doesn't match the known-good reference. It may have been tampered with."
+    };
+  }
+
+  if (staticAnalysisCritical) {
+    const first = (staticAnalysisFindings || [])[0];
+    return {
+      riskLevel: "dangerous",
+      emoji: "🔴",
+      headline: "Delete Immediately",
+      detail: first
+        ? `Byte-level inspection found a critical red flag: ${first.label}.`
+        : "Byte-level inspection of the actual file content found a critical red flag."
     };
   }
 

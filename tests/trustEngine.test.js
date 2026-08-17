@@ -8,6 +8,8 @@ test("calculateTrustScore returns high score when all checks pass", () => {
     publisherVerificationScore: 100,
     vtScore: 95,
     vtApplicable: true,
+    staticAnalysisScore: 95,
+    staticAnalysisApplicable: true,
     vulnerabilityScore: 90,
     vulnerabilityApplicable: true,
     httpsScore: 100,
@@ -21,7 +23,7 @@ test("calculateTrustScore returns high score when all checks pass", () => {
   assert.equal(result.trustScore >= 95, true);
   assert.equal(result.safeBrowsingOverride, false);
   assert.equal(result.chromeDangerFlagged, false);
-  assert.equal(result.checksApplicable, 7);
+  assert.equal(result.checksApplicable, 8);
 });
 
 test("calculateTrustScore renormalizes weights when checks are not applicable", () => {
@@ -30,6 +32,8 @@ test("calculateTrustScore renormalizes weights when checks are not applicable", 
     publisherVerificationScore: 100,
     vtScore: 50,
     vtApplicable: false,
+    staticAnalysisScore: 50,
+    staticAnalysisApplicable: false,
     vulnerabilityScore: 70,
     vulnerabilityApplicable: false,
     httpsScore: 100,
