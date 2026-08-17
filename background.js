@@ -20,6 +20,7 @@ import { CACHE_TTL_MS } from "./modules/config.js";
 import { getValidAccessToken } from "./modules/emailAuth.js";
 import { listRecentMessageIds, getMessage } from "./modules/gmailClient.js";
 import { analyzeEmailForPhishing } from "./modules/phishingAnalysis.js";
+import { isDomainBlocked } from "./modules/domainBlocklist.js";
 
 const CACHE_PRUNE_ALARM = "sd_cache_prune";
 const EMAIL_SCAN_ALARM = "sd_email_scan";
@@ -43,6 +44,18 @@ chrome.downloads.onCreated.addListener(async (item) => {
 
   const parsed = parseDownloadItem(freshItem);
   console.log("[SecureDownload AI] parsed download:", parsed);
+
+  const blockCheck = isDomainBlocked(parsed.domain, settings.blockedDomains);
+  if (blockCheck.blocked) {
+    console.log("[SecureDownload AI] domain on blocklist:", parsed.domain, "→", blockCheck.matchedEntry);
+    try {
+      await chrome.downloads.pause(item.id);
+    } catch (err) {
+      console.warn("[SecureDownload AI] could not pause blocklisted download:", err);
+    }
+    await handleBlocklistedDownload(parsed, blockCheck);
+    return;
+  }
 
   // Monitor & analyze ALL downloads (executables, archives, documents, scripts, media, code, etc.)
   try {
@@ -70,6 +83,43 @@ chrome.downloads.onCreated.addListener(async (item) => {
       });
     });
 });
+
+async function handleBlocklistedDownload(parsed, blockCheck) {
+  const recommendation = getRecommendation(
+    { trustScore: 0, safeBrowsingOverride: false },
+    { blocklistMatch: blockCheck.matchedEntry }
+  );
+
+  const record = {
+    downloadId: parsed.downloadId,
+    filename: parsed.filename,
+    extension: parsed.extension,
+    category: parsed.category,
+    url: parsed.url,
+    domain: parsed.domain,
+    scannedAt: new Date().toISOString(),
+    trustScore: 0,
+    contributions: {},
+    checksApplicable: 0,
+    checksTotal: 0,
+    riskLevel: recommendation.riskLevel,
+    recommendation,
+    blocklistMatch: blockCheck.matchedEntry,
+    websiteSecurity: null,
+    details: {
+      blocklist: { blocked: true, matchedEntry: blockCheck.matchedEntry }
+    },
+    action: "pending"
+  };
+
+  await setInFlightScan(parsed.downloadId, { parsed, record });
+  await saveScanRecord(record);
+  await resolveDownload(parsed.downloadId, "deleted");
+  record.action = "deleted";
+
+  notifyResult(record, false);
+  chrome.runtime.sendMessage({ type: "SD_ANALYSIS_COMPLETE", record, autoResumed: false }).catch(() => {});
+}
 
 async function runAnalysisPipeline(parsed, settings) {
   // Fetch site headers for vulnerability scanning

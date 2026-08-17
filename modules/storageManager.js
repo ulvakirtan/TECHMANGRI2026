@@ -191,6 +191,7 @@ function defaultSettings() {
     safeBrowsingApiKey: "",
     nvdApiKey: "",
     extraTrustedDomains: [],
+    blockedDomains: [],         // user deny list — downloads from these hosts are rejected
     knownGoodHashes: {},        // { filename_lowercase: sha256 }
     autoAnalyze: true,
     blockDangerousByDefault: false,

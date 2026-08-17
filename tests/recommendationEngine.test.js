@@ -57,3 +57,14 @@ test("getRecommendation forces dangerous on Chrome danger flag", () => {
 
   assert.equal(result.riskLevel, "dangerous");
 });
+
+test("getRecommendation returns blocked domain message for blocklist hits", () => {
+  const result = getRecommendation(
+    { trustScore: 0, safeBrowsingOverride: false },
+    { blocklistMatch: "evil.com" }
+  );
+
+  assert.equal(result.riskLevel, "dangerous");
+  assert.equal(result.headline, "Blocked Domain");
+  assert.match(result.detail, /evil\.com/);
+});

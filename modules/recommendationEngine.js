@@ -7,7 +7,16 @@ import { RISK_THRESHOLDS } from "./config.js";
 
 export function getRecommendation(trustResult, context = {}) {
   const { trustScore, safeBrowsingOverride } = trustResult;
-  const { looksLikeTyposquat, integrityStatus, chromeDanger, staticAnalysisCritical, staticAnalysisFindings } = context;
+  const { looksLikeTyposquat, integrityStatus, chromeDanger, staticAnalysisCritical, staticAnalysisFindings, blocklistMatch } = context;
+
+  if (blocklistMatch) {
+    return {
+      riskLevel: "dangerous",
+      emoji: "🔴",
+      headline: "Blocked Domain",
+      detail: `This download source (${blocklistMatch}) is on your personal blocklist.`
+    };
+  }
 
   if (safeBrowsingOverride) {
     return {

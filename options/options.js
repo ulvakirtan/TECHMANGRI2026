@@ -11,6 +11,7 @@ const els = {
   blockDangerous: document.getElementById("blockDangerous"),
   allowVtUpload: document.getElementById("allowVtUpload"),
   trustedDomains: document.getElementById("trustedDomains"),
+  blockedDomains: document.getElementById("blockedDomains"),
   knownHashes: document.getElementById("knownHashes"),
   saveBtn: document.getElementById("saveBtn"),
   savedMsg: document.getElementById("savedMsg"),
@@ -34,6 +35,7 @@ async function init() {
   els.blockDangerous.checked = Boolean(settings.blockDangerousByDefault);
   els.allowVtUpload.checked = Boolean(settings.allowVirusTotalUpload);
   els.trustedDomains.value = (settings.extraTrustedDomains || []).join("\n");
+  els.blockedDomains.value = (settings.blockedDomains || []).join("\n");
   els.knownHashes.value = Object.entries(settings.knownGoodHashes || {})
     .map(([name, hash]) => `${name} = ${hash}`)
     .join("\n");
@@ -80,6 +82,11 @@ async function onSave() {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 
+  const blockedDomains = els.blockedDomains.value
+    .split("\n")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+
   const knownGoodHashes = {};
   for (const line of els.knownHashes.value.split("\n")) {
     const [name, hash] = line.split("=").map((s) => s && s.trim());
@@ -94,6 +101,7 @@ async function onSave() {
     blockDangerousByDefault: els.blockDangerous.checked,
     allowVirusTotalUpload: els.allowVtUpload.checked,
     extraTrustedDomains,
+    blockedDomains,
     knownGoodHashes,
     emailScanEnabled: els.emailScanEnabled.checked,
     emailScanIntervalMinutes: Math.max(5, Number(els.emailScanInterval.value) || 15),

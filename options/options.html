@@ -71,6 +71,15 @@
     </section>
 
     <section class="card">
+      <h2>Blocked Domains</h2>
+      <p class="hint">
+        One per line — e.g. <code>malware-site.xyz</code>. Downloads from these domains (including subdomains)
+        are immediately flagged <strong>Dangerous</strong> without running threat-intelligence API calls.
+      </p>
+      <textarea id="blockedDomains" rows="4" placeholder="badware.net&#10;phishing-downloads.ru"></textarea>
+    </section>
+
+    <section class="card">
       <h2>Known-Good File Hashes</h2>
       <p class="hint">One per line, format <code>filename.exe = sha256hash</code>. Used for the File Integrity check.</p>
       <textarea id="knownHashes" rows="4" placeholder="setup.exe = 3a7bd3e2360a3d..."></textarea>
