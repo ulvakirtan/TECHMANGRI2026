@@ -1,6 +1,8 @@
+// popup/popup.js
 import { WEIGHTS } from "../modules/config.js";
-import { getHistory, getStats, getEmailHistory } from "../modules/storageManager.js";
+import { getHistory, getStats, getEmailHistory, getSettings } from "../modules/storageManager.js";
 import { isGmailConnected } from "../modules/emailAuth.js";
+import { getAiAvailability, explainDownloadScan } from "../modules/aiAnalysis.js";
 
 function escapeHtml(str) {
   if (typeof str !== "string") return "";
@@ -12,65 +14,105 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
-
 const FACTOR_META = [
-  { key: "officialWebsite", label: "Official Website", from: (r) => r.details.source.officialWebsiteScore, applicable: () => true },
-  { key: "publisherVerification", label: "Publisher Trust", from: (r) => r.details.publisher.publisherVerificationScore, applicable: () => true },
-  { key: "virusTotal", label: "VirusTotal", from: (r) => r.details.virusTotal.vtScore, applicable: (r) => r.details.virusTotal.status !== "not_configured" },
-  { key: "staticAnalysis", label: "Byte-Level Scan", from: (r) => r.details.staticAnalysis.staticAnalysisScore, applicable: (r) => r.details.staticAnalysis && r.details.staticAnalysis.status !== "no_content" },
-  { key: "vulnerability", label: "Vulnerabilities", from: (r) => r.details.vulnerability.vulnerabilityScore, applicable: (r) => !["no_version_detected", "error"].includes(r.details.vulnerability.status) },
-  { key: "https", label: "HTTPS Security", from: (r) => r.details.https.httpsScore, applicable: () => true },
-  { key: "fileIntegrity", label: "File Integrity", from: (r) => r.details.integrity.integrityScore, applicable: (r) => ["matches_known_good", "hash_mismatch_possible_tampering"].includes(r.details.integrity.status) },
-  { key: "sourceReputation", label: "Source Rep.", from: (r) => r.details.source.sourceReputationScore, applicable: () => true }
+  {
+    key: "officialWebsite",
+    label: "Official Website",
+    from: (r) => r.details.source.officialWebsiteScore,
+    reason: (r) => r.details.source.isKnownOfficial ? "Verified official publisher domain" : r.details.source.looksLikeTyposquat ? `Possible impersonation of ${r.details.source.suspiciouslyCloseTo}` : "Unverified third-party host",
+    applicable: () => true
+  },
+  {
+    key: "publisherVerification",
+    label: "Publisher Trust",
+    from: (r) => r.details.publisher.publisherVerificationScore,
+    reason: (r) => r.details.publisher.claimedPublisher ? `Recognized vendor: ${r.details.publisher.claimedPublisher}` : "Unknown software vendor signature",
+    applicable: () => true
+  },
+  {
+    key: "virusTotal",
+    label: "VirusTotal",
+    from: (r) => r.details.virusTotal.vtScore,
+    reason: (r) => r.details.virusTotal.status === "not_configured" ? "API key not configured in Settings" : `${r.details.virusTotal.malicious || 0} engine flags`,
+    applicable: (r) => r.details.virusTotal.status !== "not_configured"
+  },
+  {
+    key: "staticAnalysis",
+    label: "Byte-Level Scan",
+    from: (r) => r.details.staticAnalysis.staticAnalysisScore,
+    reason: (r) => r.details.staticAnalysis.reason || (r.details.staticAnalysis.findings?.length ? r.details.staticAnalysis.findings[0].label : "Passed structural bytecode checks"),
+    applicable: (r) => r.details.staticAnalysis && r.details.staticAnalysis.status !== "no_content"
+  },
+  {
+    key: "vulnerability",
+    label: "Vulnerabilities",
+    from: (r) => r.details.vulnerability.vulnerabilityScore,
+    reason: (r) => r.details.vulnerability.status === "cves_found" ? `${r.details.vulnerability.cves.length} CVEs matched version` : "No known CVE matches",
+    applicable: (r) => !["no_version_detected", "error"].includes(r.details.vulnerability.status)
+  },
+  {
+    key: "https",
+    label: "HTTPS Security",
+    from: (r) => r.details.https.httpsScore,
+    reason: (r) => r.details.https.isHttps ? "TLS/SSL Encrypted transfer" : "Insecure cleartext HTTP transfer",
+    applicable: () => true
+  },
+  {
+    key: "fileIntegrity",
+    label: "File Integrity",
+    from: (r) => r.details.integrity.integrityScore,
+    reason: (r) => r.details.integrity.status === "matches_known_good" ? "Exact SHA-256 hash match" : r.details.integrity.status === "hash_mismatch_possible_tampering" ? "Hash mismatch detected" : "No baseline hash configured",
+    applicable: (r) => ["matches_known_good", "hash_mismatch_possible_tampering"].includes(r.details.integrity.status)
+  },
+  {
+    key: "sourceReputation",
+    label: "Source Rep.",
+    from: (r) => r.details.source.sourceReputationScore,
+    reason: (r) => r.details.source.isKnownOfficial ? "High reputation distribution CDN" : "Standard domain reputation",
+    applicable: () => true
+  }
 ];
 
 const GAUGE_R = 72;
-const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_R; // ~452.389
-
+const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_R;
 const FACTOR_R = 84;
-const FACTOR_CIRCUMFERENCE = 2 * Math.PI * FACTOR_R; // ~527.787
+const FACTOR_CIRCUMFERENCE = 2 * Math.PI * FACTOR_R;
 
 const els = {
-  // Tabs
   tabDownload: document.getElementById("tabDownload"),
   tabWebsite: document.getElementById("tabWebsite"),
   tabHistory: document.getElementById("tabHistory"),
   tabEmail: document.getElementById("tabEmail"),
-
-  // Views
   downloadView: document.getElementById("downloadView"),
   websiteView: document.getElementById("websiteView"),
   historyPanel: document.getElementById("historyPanel"),
   emailPanel: document.getElementById("emailPanel"),
-
-  // Download view elements
   emptyState: document.getElementById("emptyState"),
   resultView: document.getElementById("resultView"),
   fileExtBadge: document.getElementById("fileExtBadge"),
   fileName: document.getElementById("fileName"),
   fileDomain: document.getElementById("fileDomain"),
-  
-  // Gauge
   gaugeSvg: document.getElementById("gaugeSvg"),
   gaugeProgress: document.getElementById("gaugeProgress"),
   gaugeFactorTrack: document.getElementById("gaugeFactorTrack"),
   gaugeScore: document.getElementById("gaugeScore"),
   gaugeRiskBadge: document.getElementById("gaugeRiskBadge"),
   gaugeRiskLabel: document.getElementById("gaugeRiskLabel"),
-
-  // Recommendation
   recommendationBanner: document.getElementById("recommendationBanner"),
   recIcon: document.getElementById("recIcon"),
   recHeadline: document.getElementById("recHeadline"),
   recDetail: document.getElementById("recDetail"),
   factorList: document.getElementById("factorList"),
-  
-  // Actions
+  aiExplainSection: document.getElementById("aiExplainSection"),
+  aiExplainBtn: document.getElementById("aiExplainBtn"),
+  aiExplainBtnText: document.getElementById("aiExplainBtnText"),
+  aiNarrativeBox: document.getElementById("aiNarrativeBox"),
+  aiNarrativeText: document.getElementById("aiNarrativeText"),
+  aiReasonsList: document.getElementById("aiReasonsList"),
+  aiConcernText: document.getElementById("aiConcernText"),
   resumeBtn: document.getElementById("resumeBtn"),
   deleteBtn: document.getElementById("deleteBtn"),
-  detailsBtn: document.getElementById("detailsBtn"),
-
-  // Website Security view elements
+  exportReportBtn: document.getElementById("exportReportBtn"),
   scanActiveTabBtn: document.getElementById("scanActiveTabBtn"),
   scanBtnText: document.getElementById("scanBtnText"),
   webDomain: document.getElementById("webDomain"),
@@ -82,13 +124,9 @@ const els = {
   corsStatus: document.getElementById("corsStatus"),
   xfoStatus: document.getElementById("xfoStatus"),
   vulnList: document.getElementById("vulnList"),
-
-  // History & Footer
   historyList: document.getElementById("historyList"),
   statsLine: document.getElementById("statsLine"),
   optionsBtn: document.getElementById("optionsBtn"),
-
-  // Email panel
   emailScanNowBtn: document.getElementById("emailScanNowBtn"),
   emailScanBtnText: document.getElementById("emailScanBtnText"),
   emailConnectionStatus: document.getElementById("emailConnectionStatus"),
@@ -98,20 +136,21 @@ const els = {
 let currentRecord = null;
 let displayedScore = 0;
 let animationFrameId = null;
+let aiExplanationsEnabled = false;
 
 init();
 
 async function init() {
   wireTabsAndButtons();
-
-  // Set SVG progress stroke dasharray initial baseline
   if (els.gaugeProgress) {
     els.gaugeProgress.style.strokeDasharray = `${GAUGE_CIRCUMFERENCE}`;
     els.gaugeProgress.style.strokeDashoffset = `${GAUGE_CIRCUMFERENCE}`;
   }
 
-  const { pending } = await chrome.runtime.sendMessage({ type: "SD_GET_PENDING" }).catch(() => ({ pending: [] }));
+  const settings = await getSettings().catch(() => ({}));
+  aiExplanationsEnabled = Boolean(settings.aiExplanationsEnabled);
 
+  const { pending } = await chrome.runtime.sendMessage({ type: "SD_GET_PENDING" }).catch(() => ({ pending: [] }));
   if (pending && pending.length) {
     renderResult(pending[0]);
   } else {
@@ -131,7 +170,6 @@ async function init() {
 function wireTabsAndButtons() {
   els.optionsBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
-  // Tab switching
   els.tabDownload.addEventListener("click", () => switchTab("download"));
   els.tabWebsite.addEventListener("click", () => {
     switchTab("website");
@@ -149,10 +187,96 @@ function wireTabsAndButtons() {
   els.scanActiveTabBtn.addEventListener("click", triggerActiveTabScan);
   els.resumeBtn.addEventListener("click", () => resolveCurrent("resumed"));
   els.deleteBtn.addEventListener("click", () => resolveCurrent("deleted"));
-  els.detailsBtn.addEventListener("click", () => {
-    if (currentRecord) chrome.downloads.show(currentRecord.downloadId);
-  });
+  els.exportReportBtn.addEventListener("click", exportAuditReport);
   els.emailScanNowBtn.addEventListener("click", triggerEmailScanNow);
+  els.aiExplainBtn.addEventListener("click", onAiExplainClick);
+}
+
+async function onAiExplainClick() {
+  if (!currentRecord) return;
+  els.aiExplainBtn.disabled = true;
+  els.aiNarrativeBox.classList.add("hidden");
+  els.aiExplainBtnText.textContent = "Checking on-device model…";
+
+  const availability = await getAiAvailability();
+  if (availability === "unsupported") {
+    els.aiExplainBtnText.textContent = "AI unavailable — update Chrome to use this";
+    els.aiExplainBtn.disabled = false;
+    return;
+  }
+  if (availability === "unavailable") {
+    els.aiExplainBtnText.textContent = "On-device AI not available on this device";
+    els.aiExplainBtn.disabled = false;
+    return;
+  }
+
+  els.aiExplainBtnText.textContent = availability === "available"
+    ? "Generating explanation…"
+    : "Downloading on-device model…";
+
+  const result = await explainDownloadScan(currentRecord, (pct) => {
+    if (availability !== "available") {
+      els.aiExplainBtnText.textContent = `Downloading on-device model… ${pct}%`;
+    }
+  });
+
+  els.aiExplainBtn.disabled = false;
+  els.aiExplainBtnText.textContent = "Explain with On-Device AI";
+
+  if (!result.ok) {
+    const messages = {
+      unsupported: "This version of Chrome doesn't support on-device AI.",
+      unavailable: "On-device AI isn't available on this device.",
+      timed_out: "The on-device model took too long to respond. Try again.",
+      error: "Couldn't generate an explanation right now."
+    };
+    els.aiNarrativeText.textContent = messages[result.reason] || messages.error;
+    els.aiReasonsList.innerHTML = "";
+    els.aiConcernText.classList.add("hidden");
+    els.aiNarrativeBox.classList.remove("hidden");
+    return;
+  }
+
+  els.aiNarrativeText.textContent = result.narrative;
+  els.aiReasonsList.innerHTML = result.topReasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("");
+  if (result.additionalConcern) {
+    els.aiConcernText.textContent = `⚠ Worth a second look: ${result.additionalConcern}`;
+    els.aiConcernText.classList.remove("hidden");
+  } else {
+    els.aiConcernText.classList.add("hidden");
+  }
+  els.aiNarrativeBox.classList.remove("hidden");
+}
+
+function exportAuditReport() {
+  if (!currentRecord) return;
+  const reportPayload = {
+    reportTitle: "SecureDownload AI - Security Audit Report",
+    generatedAt: new Date().toISOString(),
+    fileDetails: {
+      filename: currentRecord.filename,
+      category: currentRecord.category,
+      domain: currentRecord.domain,
+      sourceUrl: currentRecord.url,
+      trustScore: currentRecord.trustScore,
+      riskLevel: currentRecord.riskLevel
+    },
+    recommendation: currentRecord.recommendation,
+    securityChecks: currentRecord.details
+  };
+
+  const jsonStr = JSON.stringify(reportPayload, null, 2);
+  const blob = new Blob([jsonStr], { type: "application/json" });
+  const blobUrl = URL.createObjectURL(blob);
+  const safeFilename = `security-report-${currentRecord.filename.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`;
+
+  const downloadLink = document.createElement("a");
+  downloadLink.href = blobUrl;
+  downloadLink.download = safeFilename;
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  document.body.removeChild(downloadLink);
+  URL.revokeObjectURL(blobUrl);
 }
 
 function switchTab(target) {
@@ -176,10 +300,9 @@ async function renderEmailView() {
 }
 
 async function triggerEmailScanNow() {
-  els.emailScanBtnText.textContent = "Scanning…";
+  els.emailScanBtnText.textContent = "Scanning...";
   const result = await chrome.runtime.sendMessage({ type: "SD_EMAIL_SCAN_NOW" }).catch(() => null);
   els.emailScanBtnText.textContent = "Scan Inbox Now";
-
   if (result?.error === "not_connected") {
     els.emailConnectionStatus.textContent = "Gmail not connected. Open Settings to connect your account.";
   } else {
@@ -190,7 +313,6 @@ async function triggerEmailScanNow() {
 async function renderEmailHistoryView() {
   const history = await getEmailHistory();
   els.emailHistoryList.textContent = "";
-
   if (!history.length) {
     const emptyNotice = document.createElement("p");
     emptyNotice.className = "empty-sub text-center";
@@ -214,7 +336,7 @@ async function renderEmailHistoryView() {
 
     const sub = document.createElement("span");
     sub.className = "h-sub";
-    sub.textContent = `${record.senderDomain || "unknown"} · ${record.riskLevel}`;
+    sub.textContent = `${record.senderDomain || "unknown"} • ${record.riskLevel}`;
 
     meta.appendChild(name);
     meta.appendChild(sub);
@@ -241,29 +363,28 @@ function renderResult(record, { readOnly = false } = {}) {
   const ext = (record.extension || "FILE").slice(0, 5).toUpperCase();
   els.fileExtBadge.textContent = ext;
   els.fileExtBadge.className = `file-ext-badge cat-${record.category || "other"}`;
-
   els.fileName.textContent = record.filename;
   els.fileName.title = record.filename;
   els.fileDomain.textContent = record.domain;
 
   const score = Math.max(0, Math.min(100, Math.round(record.trustScore || 0)));
   const risk = record.riskLevel || getRiskLevelText(score);
-
   els.gaugeRiskLabel.textContent = risk;
 
-  // Update Score Gauge
   updateGauge(score, record);
 
-  // Recommendation Banner
   const recRisk = record.recommendation ? record.recommendation.riskLevel : (score >= 80 ? "safe" : score >= 50 ? "warning" : "dangerous");
   els.recommendationBanner.className = `recommendation-banner risk-${recRisk}`;
-  els.recHeadline.textContent = record.recommendation ? record.recommendation.headline : "Security Audit Completed";
+  els.recHeadline.textContent = record.recommendation ? record.recommendation.headline : "Security Assessment Completed";
   els.recDetail.textContent = record.recommendation ? record.recommendation.detail : "Review the factor breakdown below.";
 
-  // Update icon in recommendation banner
   updateRecIcon(recRisk);
-
   renderFactors(record);
+
+  els.aiExplainSection.classList.toggle("hidden", !aiExplanationsEnabled);
+  els.aiNarrativeBox.classList.add("hidden");
+  els.aiExplainBtnText.textContent = "Explain with On-Device AI";
+  els.aiExplainBtn.disabled = false;
 
   const pendingActions = !readOnly && record.action === "pending";
   els.resumeBtn.classList.toggle("hidden", !pendingActions);
@@ -277,34 +398,24 @@ function renderResult(record, { readOnly = false } = {}) {
 function updateGauge(targetScore, record) {
   const color = scoreColor(targetScore);
   document.documentElement.style.setProperty("--gauge-color", color);
-
-  // Smooth stroke-dashoffset animation
   const offset = GAUGE_CIRCUMFERENCE * (1 - targetScore / 100);
   els.gaugeProgress.style.strokeDashoffset = `${offset}`;
-
-  // Animate numerical score counter smoothly
   animateScoreCounter(targetScore);
-
-  // Render outer factor breakdown track (segmented outer ring)
   renderFactorSegments(record);
 }
 
 function animateScoreCounter(targetScore) {
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
-
   const startScore = displayedScore;
   const startTime = performance.now();
-  const duration = 600; // ms
+  const duration = 600;
 
   function step(now) {
     const elapsed = now - startTime;
     const progress = Math.min(1, elapsed / duration);
-    // Ease-out quad
     const easeProgress = 1 - (1 - progress) * (1 - progress);
-    
     displayedScore = Math.round(startScore + (targetScore - startScore) * easeProgress);
     els.gaugeScore.textContent = displayedScore;
-
     if (progress < 1) {
       animationFrameId = requestAnimationFrame(step);
     } else {
@@ -319,9 +430,8 @@ function animateScoreCounter(targetScore) {
 function renderFactorSegments(record) {
   const track = els.gaugeFactorTrack;
   track.innerHTML = "";
-
   let currentOffset = 0;
-  const gapPixels = 4; // Gap between factor segments in SVG px
+  const gapPixels = 4;
 
   for (const meta of FACTOR_META) {
     const weight = WEIGHTS[meta.key] || 0.1;
@@ -386,9 +496,12 @@ function renderFactors(record) {
 
     if (!meta.applicable(record)) {
       row.innerHTML = `
-        <span class="factor-label">${meta.label}</span>
-        <span class="factor-track"><span class="factor-fill factor-fill-na"></span></span>
-        <span class="factor-value factor-value-na">N/A</span>
+        <div class="factor-row-main">
+          <span class="factor-label">${meta.label}</span>
+          <span class="factor-track"><span class="factor-fill factor-fill-na"></span></span>
+          <span class="factor-value factor-value-na">N/A</span>
+        </div>
+        <span class="factor-reason">${escapeHtml(meta.reason(record))}</span>
       `;
       els.factorList.appendChild(row);
       continue;
@@ -396,9 +509,12 @@ function renderFactors(record) {
 
     const score = Math.round(meta.from(record));
     row.innerHTML = `
-      <span class="factor-label">${meta.label}</span>
-      <span class="factor-track"><span class="factor-fill" style="width:${score}%;background:${scoreColor(score)}"></span></span>
-      <span class="factor-value">${score}%</span>
+      <div class="factor-row-main">
+        <span class="factor-label">${meta.label}</span>
+        <span class="factor-track"><span class="factor-fill" style="width:${score}%;background:${scoreColor(score)}"></span></span>
+        <span class="factor-value">${score}%</span>
+      </div>
+      <span class="factor-reason">${escapeHtml(meta.reason(record))}</span>
     `;
     els.factorList.appendChild(row);
   }
@@ -407,7 +523,7 @@ function renderFactors(record) {
   if (typeof checksApplicable === "number" && checksApplicable < checksTotal) {
     const note = document.createElement("div");
     note.className = "factor-note";
-    note.textContent = `Score reflects ${checksApplicable} of ${checksTotal} checks. Configure API keys in Settings to enable VirusTotal & Safe Browsing checks.`;
+    note.textContent = `Score reflects ${checksApplicable} of ${checksTotal} active checks. Set API keys in Settings for VirusTotal scans.`;
     els.factorList.appendChild(note);
   }
 
@@ -415,7 +531,7 @@ function renderFactors(record) {
   if (staticFindings.length) {
     const box = document.createElement("div");
     box.className = "factor-note";
-    box.innerHTML = `<strong>Byte-level scan findings:</strong><br>` +
+    box.innerHTML = `<strong>Findings:</strong><br>` +
       staticFindings.map(f => `• ${escapeHtml(f.label)}`).join("<br>");
     els.factorList.appendChild(box);
   }
@@ -425,7 +541,6 @@ async function triggerActiveTabScan() {
   els.scanBtnText.textContent = "Auditing Webpage Security...";
   const res = await chrome.runtime.sendMessage({ type: "SD_GET_ACTIVE_TAB_SECURITY" }).catch(() => null);
   els.scanBtnText.textContent = "Scan Current Webpage";
-
   if (res && res.audit) {
     renderWebsiteSecurity(res.audit);
   } else if (res && res.error) {
@@ -453,22 +568,19 @@ function renderWebsiteSecurity(audit) {
   els.webScoreBadge.textContent = score;
   els.webScoreRing.style.background = scoreColor(score);
 
-  // Security Headers Grid
   const sh = audit.securityHeaders || {};
   setValPill(els.hstsStatus, sh.hsts !== "Not Set", sh.hsts);
   setValPill(els.cspStatus, sh.csp !== "Not Set", sh.csp);
   setValPill(els.corsStatus, sh.cors !== "*", sh.cors);
   setValPill(els.xfoStatus, sh.xfo !== "Not Set", sh.xfo);
 
-  // Render Vulnerabilities list
   els.vulnList.innerHTML = "";
   const vulns = audit.vulnerabilities || [];
-
   if (!vulns.length) {
     els.vulnList.innerHTML = `
       <div class="vuln-card clean">
         <div class="vuln-header">
-          <span class="v-title">✅ No Critical Vulnerabilities Detected</span>
+          <span class="v-title">✓ No Critical Vulnerabilities Detected</span>
           <span class="threat-tag level-safe">SECURE</span>
         </div>
         <p class="v-harm text-muted">The website enforces HTTPS, security headers, and domain trust parameters.</p>
@@ -480,8 +592,8 @@ function renderWebsiteSecurity(audit) {
   for (const v of vulns) {
     const card = document.createElement("div");
     const threatClass = `level-${escapeHtml((v.threatLevel || "medium").toLowerCase())}`;
-
     const owaspTag = v.owaspCategory ? `<div class="owasp-badge">${escapeHtml(v.owaspCategory)}</div>` : "";
+
     card.className = "vuln-card";
     card.innerHTML = `
       <div class="vuln-header">
@@ -518,7 +630,7 @@ async function resolveCurrent(action) {
 
 async function renderStatsLine() {
   const stats = await getStats();
-  els.statsLine.textContent = `${stats.totalScanned} scanned · ${stats.filesBlocked} blocked`;
+  els.statsLine.textContent = `${stats.totalScanned} scanned • ${stats.filesBlocked} blocked`;
 }
 
 async function renderHistoryView() {
@@ -534,7 +646,7 @@ async function renderHistoryView() {
       item.innerHTML = `
         <div class="h-meta">
           <span class="h-name" title="${escapeHtml(record.filename)}">${escapeHtml(record.filename)}</span>
-          <span class="h-sub">${escapeHtml(record.domain)} · ${escapeHtml((record.extension || "file").toUpperCase())}</span>
+          <span class="h-sub">${escapeHtml(record.domain)} • ${escapeHtml((record.extension || "file").toUpperCase())}</span>
         </div>
         <span class="h-score-badge" style="background:${badgeColor}20;color:${badgeColor};border:1px solid ${badgeColor}40">${record.trustScore}</span>
       `;
@@ -546,7 +658,6 @@ async function renderHistoryView() {
     }
   }
 }
-
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "SD_ANALYSIS_COMPLETE") {

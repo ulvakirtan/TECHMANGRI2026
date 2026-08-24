@@ -191,7 +191,6 @@ function defaultSettings() {
     safeBrowsingApiKey: "",
     nvdApiKey: "",
     extraTrustedDomains: [],
-    blockedDomains: [],         // user deny list — downloads from these hosts are rejected
     knownGoodHashes: {},        // { filename_lowercase: sha256 }
     autoAnalyze: true,
     blockDangerousByDefault: false,
@@ -202,6 +201,12 @@ function defaultSettings() {
     // Email security (Gmail, OAuth) — see modules/emailAuth.js
     emailScanEnabled: false,
     emailScanIntervalMinutes: 15,
-    emailMaxMessagesPerScan: 25
+    emailMaxMessagesPerScan: 25,
+    // On-device AI narrative (Chrome's built-in Prompt API / Gemini Nano) —
+    // see modules/aiAnalysis.js. Nothing ever leaves the device for this
+    // feature, but it's still opt-in because the *first* use on a given
+    // device can trigger a multi-gigabyte model download — that's the
+    // tradeoff, not privacy.
+    aiExplanationsEnabled: false
   };
 }

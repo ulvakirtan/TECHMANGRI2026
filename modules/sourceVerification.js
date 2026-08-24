@@ -4,22 +4,23 @@
 import { KNOWN_PUBLISHERS, VULNERABILITY_DEFINITIONS } from "./config.js";
 
 const SUSPICIOUS_TLDS = new Set(["top", "xyz", "cc", "click", "download", "link", "gq", "work", "cf", "tk", "ml", "ga"]);
-
+const MULTIPART_TLDS = new Set(["co.uk", "org.uk", "gov.uk", "ac.uk", "com.au", "net.au", "org.au", "edu.au", "co.nz", "co.jp", "com.br"]);
 const levenshteinCache = new Map();
 
 export function levenshtein(a, b) {
   if (a === b) return 0;
   const lenDiff = Math.abs(a.length - b.length);
   if (lenDiff > 2) return lenDiff;
-
   const key = a < b ? `${a}:${b}` : `${b}:${a}`;
   if (levenshteinCache.has(key)) return levenshteinCache.get(key);
 
   const dp = Array.from({ length: a.length + 1 }, (_, i) =>
     Array(b.length + 1).fill(0).map((_, j) => (i === 0 ? j : 0))
   );
+
   for (let i = 0; i <= a.length; i++) dp[i][0] = i;
   for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+
   for (let i = 1; i <= a.length; i++) {
     for (let j = 1; j <= b.length; j++) {
       dp[i][j] = a[i - 1] === b[j - 1]
@@ -27,6 +28,7 @@ export function levenshtein(a, b) {
         : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
     }
   }
+
   const result = dp[a.length][b.length];
   if (levenshteinCache.size < 5000) {
     levenshteinCache.set(key, result);
@@ -34,10 +36,16 @@ export function levenshtein(a, b) {
   return result;
 }
 
-
-function registrableDomain(hostname) {
-  const parts = hostname.split(".");
-  return parts.length >= 2 ? parts.slice(-2).join(".") : hostname;
+export function registrableDomain(hostname) {
+  if (!hostname) return "";
+  const parts = hostname.toLowerCase().split(".");
+  if (parts.length <= 2) return hostname;
+  
+  const lastTwo = parts.slice(-2).join(".");
+  if (MULTIPART_TLDS.has(lastTwo) && parts.length >= 3) {
+    return parts.slice(-3).join(".");
+  }
+  return parts.slice(-2).join(".");
 }
 
 export function verifySource(domain, extraTrustedDomains = []) {
@@ -51,6 +59,7 @@ export function verifySource(domain, extraTrustedDomains = []) {
 
   let closestMatch = null;
   let closestDistance = Infinity;
+
   if (!isKnownOfficial) {
     for (const d of trustedList) {
       const dist = levenshtein(reg, d);
@@ -88,12 +97,6 @@ export function verifyHttps(url) {
   };
 }
 
-/**
- * Perform a comprehensive Website Security and Vulnerability Audit
- * @param {string} url - Target URL to scan
- * @param {Object} headers - Response headers map (lowercase keys)
- * @param {string[]} extraTrustedDomains
- */
 export function analyzeWebsiteVulnerabilities(url, headers = {}, extraTrustedDomains = []) {
   let domain = "";
   try {
@@ -106,7 +109,6 @@ export function analyzeWebsiteVulnerabilities(url, headers = {}, extraTrustedDom
   const isHttps = url.startsWith("https://");
   const vulnerabilities = [];
 
-  // Normalize header keys to lowercase
   const normalizedHeaders = {};
   for (const [k, v] of Object.entries(headers || {})) {
     normalizedHeaders[k.toLowerCase()] = String(v);
@@ -184,7 +186,6 @@ export function analyzeWebsiteVulnerabilities(url, headers = {}, extraTrustedDom
     });
   }
 
-  // Calculate Overall Website Security Score (0-100)
   let score = 100;
   if (!isHttps) score -= 40;
   if (sourceCheck.looksLikeTyposquat) score -= 45;
@@ -194,12 +195,6 @@ export function analyzeWebsiteVulnerabilities(url, headers = {}, extraTrustedDom
   if (!xfo && !hasFrameAncestors) score -= 10;
   if (!xcto) score -= 5;
   if (SUSPICIOUS_TLDS.has(tld)) score -= 15;
-  // Being a known-official domain is a modest credibility bonus, not a
-  // floor — it must never mask an actually-misconfigured official site.
-  // (Previously `score = Math.max(score, 85)` here, which meant a known
-  // domain with every security header missing still reported as "85/100
-  // secure" — domain identity and current header hygiene are different
-  // signals and shouldn't be conflated.)
   if (sourceCheck.isKnownOfficial) score += 10;
 
   score = Math.max(0, Math.min(100, Math.round(score)));
@@ -225,4 +220,3 @@ export function analyzeWebsiteVulnerabilities(url, headers = {}, extraTrustedDom
     }
   };
 }
-

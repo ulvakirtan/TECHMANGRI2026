@@ -1,7 +1,7 @@
 // options/options.js
 
 import { getSettings, saveSettings } from "../modules/storageManager.js";
-import { connectGmail, disconnectGmail, isGmailConnected } from "../modules/emailAuth.js";
+import { connectGmail, disconnectGmail, isGmailConnected, getStoredClientId } from "../modules/emailAuth.js";
 
 const els = {
   vtKey: document.getElementById("vtKey"),
@@ -11,11 +11,12 @@ const els = {
   blockDangerous: document.getElementById("blockDangerous"),
   allowVtUpload: document.getElementById("allowVtUpload"),
   trustedDomains: document.getElementById("trustedDomains"),
-  blockedDomains: document.getElementById("blockedDomains"),
   knownHashes: document.getElementById("knownHashes"),
+  aiExplanationsEnabled: document.getElementById("aiExplanationsEnabled"),
   saveBtn: document.getElementById("saveBtn"),
   savedMsg: document.getElementById("savedMsg"),
 
+  gmailClientId: document.getElementById("gmailClientId"),
   connectGmailBtn: document.getElementById("connectGmailBtn"),
   disconnectGmailBtn: document.getElementById("disconnectGmailBtn"),
   gmailStatus: document.getElementById("gmailStatus"),
@@ -35,7 +36,7 @@ async function init() {
   els.blockDangerous.checked = Boolean(settings.blockDangerousByDefault);
   els.allowVtUpload.checked = Boolean(settings.allowVirusTotalUpload);
   els.trustedDomains.value = (settings.extraTrustedDomains || []).join("\n");
-  els.blockedDomains.value = (settings.blockedDomains || []).join("\n");
+  els.aiExplanationsEnabled.checked = Boolean(settings.aiExplanationsEnabled);
   els.knownHashes.value = Object.entries(settings.knownGoodHashes || {})
     .map(([name, hash]) => `${name} = ${hash}`)
     .join("\n");
@@ -43,6 +44,7 @@ async function init() {
   els.emailScanEnabled.checked = Boolean(settings.emailScanEnabled);
   els.emailScanInterval.value = settings.emailScanIntervalMinutes || 15;
   els.emailMaxMessages.value = settings.emailMaxMessagesPerScan || 25;
+  els.gmailClientId.value = await getStoredClientId();
 
   els.saveBtn.addEventListener("click", onSave);
   els.connectGmailBtn.addEventListener("click", onConnectGmail);
@@ -55,13 +57,13 @@ async function refreshGmailStatus() {
   const connected = await isGmailConnected();
   els.gmailStatus.textContent = connected
     ? "✅ Gmail connected — read-only access."
-    : "Not connected. Click Connect and choose your Google account.";
+    : "Not connected. Enter your Client ID above and click Connect.";
 }
 
 async function onConnectGmail() {
   els.connectGmailBtn.disabled = true;
   els.gmailStatus.textContent = "Opening Google sign-in…";
-  const result = await connectGmail();
+  const result = await connectGmail(els.gmailClientId.value);
   els.connectGmailBtn.disabled = false;
 
   if (result.ok) {
@@ -82,11 +84,6 @@ async function onSave() {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 
-  const blockedDomains = els.blockedDomains.value
-    .split("\n")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-
   const knownGoodHashes = {};
   for (const line of els.knownHashes.value.split("\n")) {
     const [name, hash] = line.split("=").map((s) => s && s.trim());
@@ -101,8 +98,8 @@ async function onSave() {
     blockDangerousByDefault: els.blockDangerous.checked,
     allowVirusTotalUpload: els.allowVtUpload.checked,
     extraTrustedDomains,
-    blockedDomains,
     knownGoodHashes,
+    aiExplanationsEnabled: els.aiExplanationsEnabled.checked,
     emailScanEnabled: els.emailScanEnabled.checked,
     emailScanIntervalMinutes: Math.max(5, Number(els.emailScanInterval.value) || 15),
     emailMaxMessagesPerScan: Math.min(100, Math.max(1, Number(els.emailMaxMessages.value) || 25))

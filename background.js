@@ -20,14 +20,12 @@ import { CACHE_TTL_MS } from "./modules/config.js";
 import { getValidAccessToken } from "./modules/emailAuth.js";
 import { listRecentMessageIds, getMessage } from "./modules/gmailClient.js";
 import { analyzeEmailForPhishing } from "./modules/phishingAnalysis.js";
-import { isDomainBlocked } from "./modules/domainBlocklist.js";
 
 const CACHE_PRUNE_ALARM = "sd_cache_prune";
 const EMAIL_SCAN_ALARM = "sd_email_scan";
 
 chrome.downloads.onCreated.addListener(async (item) => {
   console.log("[SecureDownload AI] onCreated fired:", item.id, item.url, item.filename);
-
   const settings = await getSettings();
   if (!settings.autoAnalyze) {
     console.log("[SecureDownload AI] autoAnalyze is off — skipping.");
@@ -45,19 +43,7 @@ chrome.downloads.onCreated.addListener(async (item) => {
   const parsed = parseDownloadItem(freshItem);
   console.log("[SecureDownload AI] parsed download:", parsed);
 
-  const blockCheck = isDomainBlocked(parsed.domain, settings.blockedDomains);
-  if (blockCheck.blocked) {
-    console.log("[SecureDownload AI] domain on blocklist:", parsed.domain, "→", blockCheck.matchedEntry);
-    try {
-      await chrome.downloads.pause(item.id);
-    } catch (err) {
-      console.warn("[SecureDownload AI] could not pause blocklisted download:", err);
-    }
-    await handleBlocklistedDownload(parsed, blockCheck);
-    return;
-  }
-
-  // Monitor & analyze ALL downloads (executables, archives, documents, scripts, media, code, etc.)
+  // Monitor & pause download while running the audit
   try {
     await chrome.downloads.pause(item.id);
     console.log("[SecureDownload AI] paused download", item.id);
@@ -77,61 +63,21 @@ chrome.downloads.onCreated.addListener(async (item) => {
       chrome.notifications.create(`sd_err_${item.id}`, {
         type: "basic",
         iconUrl: chrome.runtime.getURL("icons/icon128.png"),
-        title: "⚠️ Security Audit Failure",
+        title: "Security Audit Failure",
         message: `Download resumed unscanned: ${parsed.filename || "file"}.\nError: ${err.message || String(err)}`,
         priority: 1
       });
     });
 });
 
-async function handleBlocklistedDownload(parsed, blockCheck) {
-  const recommendation = getRecommendation(
-    { trustScore: 0, safeBrowsingOverride: false },
-    { blocklistMatch: blockCheck.matchedEntry }
-  );
-
-  const record = {
-    downloadId: parsed.downloadId,
-    filename: parsed.filename,
-    extension: parsed.extension,
-    category: parsed.category,
-    url: parsed.url,
-    domain: parsed.domain,
-    scannedAt: new Date().toISOString(),
-    trustScore: 0,
-    contributions: {},
-    checksApplicable: 0,
-    checksTotal: 0,
-    riskLevel: recommendation.riskLevel,
-    recommendation,
-    blocklistMatch: blockCheck.matchedEntry,
-    websiteSecurity: null,
-    details: {
-      blocklist: { blocked: true, matchedEntry: blockCheck.matchedEntry }
-    },
-    action: "pending"
-  };
-
-  await setInFlightScan(parsed.downloadId, { parsed, record });
-  await saveScanRecord(record);
-  await resolveDownload(parsed.downloadId, "deleted");
-  record.action = "deleted";
-
-  notifyResult(record, false);
-  chrome.runtime.sendMessage({ type: "SD_ANALYSIS_COMPLETE", record, autoResumed: false }).catch(() => {});
-}
-
 async function runAnalysisPipeline(parsed, settings) {
   // Fetch site headers for vulnerability scanning
   const headers = await fetchSiteHeaders(parsed.url);
   const websiteSecurity = analyzeWebsiteVulnerabilities(parsed.url, headers, settings.extraTrustedDomains);
 
-  // Run integrity check first so computed sha256 hash is passed to VirusTotal.
-  // integrityResult.buffer holds the actual downloaded bytes in memory only —
-  // it must NEVER be written to chrome.storage (see stripping below).
+  // Integrity check fetches hash & buffer
   const integrityResult = await checkFileIntegrity(parsed.url, settings.knownGoodHashes, parsed.filename);
   const vtKeyMaterial = integrityResult.sha256 || parsed.url;
-
   const publisherList = await getPublisherList();
 
   const [sourceResult, httpsResult, publisherResult, vtResult, sbResult, vulnResult] =
@@ -139,21 +85,14 @@ async function runAnalysisPipeline(parsed, settings) {
       Promise.resolve(verifySource(parsed.domain, settings.extraTrustedDomains)),
       Promise.resolve(verifyHttps(parsed.url)),
       Promise.resolve(verifyPublisher(parsed, settings.extraTrustedDomains, publisherList)),
-
       cachedThreatCheck("vt", vtKeyMaterial, () => checkVirusTotal({ url: parsed.url, sha256: integrityResult.sha256 }, settings.virusTotalApiKey)),
       cachedThreatCheck("sb", parsed.url, () => checkSafeBrowsing(parsed.url, settings.safeBrowsingApiKey)),
       cachedThreatCheck("nvd", parsed.filename, () => checkVulnerabilities(parsed.filename, settings.nvdApiKey))
     ]);
 
-  // "Bit by bit" checks — both run against the bytes already fetched above,
-  // no second download:
-  //  1. Local static analysis (magic bytes, entropy, macros, script patterns).
-  //  2. If VT has never seen this exact hash before AND the user opted in,
-  //     actually submit the bytes for a fresh multi-engine scan instead of
-  //     settling for the neutral "unseen" score.
   const staticResult = runStaticAnalysis(integrityResult.buffer, parsed);
-
   let finalVtResult = vtResult;
+
   if (
     vtResult.status === "unseen_by_virustotal" &&
     settings.allowVirusTotalUpload &&
@@ -161,13 +100,10 @@ async function runAnalysisPipeline(parsed, settings) {
     integrityResult.buffer
   ) {
     finalVtResult = await uploadFileToVirusTotal(integrityResult.buffer, parsed.filename, settings.virusTotalApiKey);
-    // Overwrite the cached "unseen" result with the real scan outcome so a
-    // second download of the same file reuses it instead of re-uploading.
     await setCached(`vt:${vtKeyMaterial}`, finalVtResult, CACHE_TTL_MS.virusTotal);
   }
 
   const staticAnalysisCritical = staticResult.findings.some(f => f.severity === "critical");
-
   const trustResult = calculateTrustScore({
     officialWebsiteScore: sourceResult.officialWebsiteScore,
     publisherVerificationScore: publisherResult.publisherVerificationScore,
@@ -193,11 +129,8 @@ async function runAnalysisPipeline(parsed, settings) {
     staticAnalysisFindings: staticResult.findings
   });
 
-  // Strip the raw bytes before anything touches chrome.storage — history
-  // records are persisted, and a 200MB ArrayBuffer per download would blow
-  // through the storage quota almost immediately.
+  // Strip raw ArrayBuffer before persistence
   const { buffer: _discardBuffer, ...integrityForRecord } = integrityResult;
-
   const record = {
     downloadId: parsed.downloadId,
     filename: parsed.filename,
@@ -229,7 +162,6 @@ async function runAnalysisPipeline(parsed, settings) {
 
   const isSafe = recommendation.riskLevel === "safe";
   let autoResumed = false;
-
   if (isSafe) {
     try {
       await chrome.downloads.resume(parsed.downloadId);
@@ -241,16 +173,9 @@ async function runAnalysisPipeline(parsed, settings) {
     }
   }
 
-  // Track in session-storage-backed state (survives service worker restarts,
-  // unlike a plain in-memory Map) so a paused download stays reviewable even
-  // if MV3 kills the idle worker mid-review.
   await setInFlightScan(parsed.downloadId, { parsed, record });
   await saveScanRecord(record);
 
-  // Auto-block dangerous downloads BEFORE notifying, so the notification
-  // text reflects what actually happened (deleted vs. still awaiting your
-  // decision) instead of describing a state that's about to be overwritten
-  // a moment later.
   const settingsNow = await getSettings();
   if (settingsNow.blockDangerousByDefault && recommendation.riskLevel === "dangerous") {
     await resolveDownload(parsed.downloadId, "deleted");
@@ -259,11 +184,6 @@ async function runAnalysisPipeline(parsed, settings) {
 
   notifyResult(record, autoResumed);
 
-  // Anything that's no longer awaiting a decision (auto-resumed or
-  // auto-deleted above) is removed from in-flight tracking now rather than
-  // lingering in chrome.storage.session for the rest of the browsing
-  // session — the popup falls back to scan history for "show the most
-  // recent result" duty, so nothing is lost by clearing it here.
   if (record.action !== "pending") {
     await removeInFlightScan(parsed.downloadId);
   }
@@ -311,7 +231,6 @@ async function resolveDownload(downloadId, action) {
     entry.record.action = action;
     await saveScanRecord(entry.record);
   }
-
   if (action === "resumed") {
     await chrome.downloads.resume(downloadId).catch(() => {});
   } else if (action === "deleted") {
@@ -321,17 +240,11 @@ async function resolveDownload(downloadId, action) {
   await removeInFlightScan(downloadId);
 }
 
-// ---------------------------------------------------------------------------
-// Email security (Gmail, read-only OAuth) — see modules/emailAuth.js,
-// modules/gmailClient.js, modules/phishingAnalysis.js.
-// ---------------------------------------------------------------------------
-
 async function scanEmailInbox({ manual = false } = {}) {
   const settings = await getSettings();
   if (!settings.emailScanEnabled && !manual) {
     return { scanned: 0, skipped: "disabled" };
   }
-
   const accessToken = await getValidAccessToken();
   if (!accessToken) {
     return { scanned: 0, error: "not_connected" };
@@ -348,7 +261,6 @@ async function scanEmailInbox({ manual = false } = {}) {
 
   const newIds = ids.filter((id) => !alreadyScanned.has(id));
   const results = [];
-
   for (const id of newIds) {
     try {
       const message = await getMessage(accessToken, id);
@@ -382,10 +294,6 @@ async function configureEmailAlarm() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Alarms: periodic cache eviction + periodic email scanning.
-// ---------------------------------------------------------------------------
-
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create(CACHE_PRUNE_ALARM, { periodInMinutes: 60 });
   configureEmailAlarm();
@@ -404,17 +312,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-// Re-configure the email alarm whenever settings change (e.g. the user
-// toggles email scanning on/off or changes the interval in Options).
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.sd_settings) {
     configureEmailAlarm();
   }
 });
-
-// ---------------------------------------------------------------------------
-// Runtime message dispatcher
-// ---------------------------------------------------------------------------
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "SD_GET_PENDING") {
@@ -464,7 +366,6 @@ chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIn
     chrome.action.openPopup().catch(() => {});
     return;
   }
-
   const downloadId = Number(notificationId.replace("sd_", ""));
   const entry = await getInFlightScan(downloadId);
   if (!entry) return;

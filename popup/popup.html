@@ -8,7 +8,6 @@
 </head>
 <body>
   <div class="app">
-
     <!-- Top Bar Header -->
     <header class="topbar">
       <div class="brand">
@@ -61,10 +60,8 @@
     </nav>
 
     <main id="mainContent">
-
       <!-- View 1: Download Analysis View -->
       <section id="downloadView" class="view-panel">
-        
         <!-- Empty State -->
         <div id="emptyState" class="empty-state hidden">
           <div class="empty-icon-wrap">
@@ -74,13 +71,12 @@
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
           </div>
-          <h3 class="empty-title">No Active Download Analyzed</h3>
-          <p class="empty-sub">Download any file or package to initiate automated real-time verification and multi-factor safety checks.</p>
+          <h3 class="empty-title">No Download Under Audit</h3>
+          <p class="empty-sub">Files are automatically analyzed for security integrity and threat intelligence upon download.</p>
         </div>
 
         <!-- Download Scan Result -->
         <div id="resultView" class="hidden">
-          
           <!-- File Card -->
           <div class="file-card">
             <div class="file-ext-badge" id="fileExtBadge">FILE</div>
@@ -106,10 +102,7 @@
                     <feComposite in="SourceGraphic" in2="blur" operator="over" />
                   </filter>
                 </defs>
-                <!-- Outer Factor Breakdown Track (Segmented ring) -->
                 <g id="gaugeFactorTrack"></g>
-
-                <!-- Inner Main Trust Circle Track -->
                 <circle cx="100" cy="100" r="72" class="gauge-track-bg" />
                 <circle id="gaugeProgress" cx="100" cy="100" r="72" class="gauge-progress" />
               </svg>
@@ -120,7 +113,7 @@
                 </div>
                 <div class="gauge-risk-pill" id="gaugeRiskBadge">
                   <span class="pill-dot"></span>
-                  <span id="gaugeRiskLabel">ANALYZING</span>
+                  <span id="gaugeRiskLabel">AUDITING</span>
                 </div>
               </div>
             </div>
@@ -136,14 +129,30 @@
               </svg>
             </div>
             <div class="rec-content">
-              <div class="rec-headline" id="recHeadline">Analyzing…</div>
-              <div class="rec-detail" id="recDetail">Executing security factors evaluation.</div>
+              <div class="rec-headline" id="recHeadline">Security Assessment Complete</div>
+              <div class="rec-detail" id="recDetail">Threat analysis metrics compiled successfully.</div>
+            </div>
+          </div>
+
+          <!-- On-Device AI Explanation -->
+          <div id="aiExplainSection" class="ai-explain-section hidden">
+            <button id="aiExplainBtn" class="btn btn-secondary w-full">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2a4 4 0 0 1 4 4v1a4 4 0 0 1 3 3.87V13a4 4 0 0 1-1.34 2.99A4 4 0 0 1 16 19a4 4 0 0 1-4 4 4 4 0 0 1-4-4 4 4 0 0 1-1.66-3.01A4 4 0 0 1 5 13v-2.13A4 4 0 0 1 8 7V6a4 4 0 0 1 4-4z"/>
+              </svg>
+              <span id="aiExplainBtnText">Explain with On-Device AI</span>
+            </button>
+            <div id="aiNarrativeBox" class="ai-narrative-box hidden">
+              <p id="aiNarrativeText" class="ai-narrative-text"></p>
+              <ul id="aiReasonsList" class="ai-reasons-list"></ul>
+              <p id="aiConcernText" class="ai-concern-text hidden"></p>
+              <p class="ai-disclaimer">AI-generated explanation of the checks above — advisory only, doesn't change the trust score.</p>
             </div>
           </div>
 
           <!-- Factor Breakdown Section -->
           <div class="section-header">
-            <span>Security Factor Breakdown</span>
+            <span>Factor Risk Breakdown</span>
           </div>
           <div class="factor-list" id="factorList" aria-label="Trust score factor breakdown"></div>
 
@@ -162,15 +171,20 @@
               </svg>
               <span>Delete File</span>
             </button>
-            <button id="detailsBtn" class="btn btn-ghost">View in Downloads</button>
+            <button id="exportReportBtn" class="btn btn-secondary">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              <span>Export Report</span>
+            </button>
           </div>
         </div>
-
       </section>
 
       <!-- View 2: Website Security & Vulnerabilities View -->
       <section id="websiteView" class="view-panel hidden">
-
         <div class="active-tab-bar">
           <button id="scanActiveTabBtn" class="btn btn-secondary w-full">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
@@ -181,7 +195,6 @@
             <span id="scanBtnText">Scan Current Webpage</span>
           </button>
         </div>
-
         <div id="webSecurityCard" class="web-card">
           <div class="web-card-header">
             <div class="web-domain-info">
@@ -192,7 +205,6 @@
               <span id="webScoreBadge">95</span>
             </div>
           </div>
-
           <div class="headers-grid" id="headersGrid">
             <div class="header-pill">
               <span class="h-name">HSTS</span>
@@ -211,16 +223,13 @@
               <span id="xfoStatus" class="h-val val-good">Protected</span>
             </div>
           </div>
-
           <div class="section-header">
             <span>Detected Weaknesses & Vulnerabilities</span>
           </div>
-
           <div id="vulnList" class="vuln-list">
             <p class="empty-sub text-center" style="padding:16px;">Click "Scan Current Webpage" or inspect website security posture.</p>
           </div>
         </div>
-
       </section>
 
       <!-- View 3: Scan History Panel -->
@@ -248,7 +257,6 @@
         </div>
         <div id="emailHistoryList" class="history-list"></div>
       </section>
-
     </main>
 
     <!-- Footer Bar -->
@@ -259,9 +267,7 @@
       </div>
       <span class="version-label">v1.0</span>
     </footer>
-
   </div>
-
   <script src="popup.js" type="module"></script>
 </body>
 </html>

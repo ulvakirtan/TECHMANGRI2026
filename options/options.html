@@ -65,18 +65,26 @@
     </section>
 
     <section class="card">
-      <h2>Additional Trusted Domains</h2>
-      <p class="hint">One per line — e.g. <code>mycompany.com</code>. These count as "Official Website" matches.</p>
-      <textarea id="trustedDomains" rows="4" placeholder="example.com&#10;another-vendor.com"></textarea>
+      <h2>On-Device AI Explanations</h2>
+      <label class="row">
+        <input type="checkbox" id="aiExplanationsEnabled" />
+        <span>Enable "Explain with AI" in the popup</span>
+      </label>
+      <p class="hint">
+        Uses Chrome's built-in on-device model (Gemini Nano / Prompt API) to turn a
+        scan's numbers into a plain-English explanation. Nothing is sent anywhere —
+        it runs fully on your device, no API key, no server. It only ever explains a
+        verdict this extension already computed; it cannot change a trust score or
+        risk level. The device may need to download the model (a few GB) the first
+        time you use this. Requires a recent version of Chrome with the on-device
+        model available — the popup will tell you if it isn't.
+      </p>
     </section>
 
     <section class="card">
-      <h2>Blocked Domains</h2>
-      <p class="hint">
-        One per line — e.g. <code>malware-site.xyz</code>. Downloads from these domains (including subdomains)
-        are immediately flagged <strong>Dangerous</strong> without running threat-intelligence API calls.
-      </p>
-      <textarea id="blockedDomains" rows="4" placeholder="badware.net&#10;phishing-downloads.ru"></textarea>
+      <h2>Additional Trusted Domains</h2>
+      <p class="hint">One per line — e.g. <code>mycompany.com</code>. These count as "Official Website" matches.</p>
+      <textarea id="trustedDomains" rows="4" placeholder="example.com&#10;another-vendor.com"></textarea>
     </section>
 
     <section class="card">
@@ -89,14 +97,17 @@
       <h2>Email Security (Gmail — read-only)</h2>
       <p class="hint">
         Connects with the <code>gmail.readonly</code> scope only — never send, modify, or delete.
-        One-time setup (only needed once, not per person using this build):
+        This uses your own Google OAuth client, not a shared one, so SecureDownload AI itself never
+        holds credentials to your account. Steps:
       </p>
       <ol class="hint" style="padding-left: 18px; margin-top: 4px;">
-        <li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>, create an OAuth 2.0 Client ID of type "Chrome Extension", using this extension's ID (shown on its card in <code>chrome://extensions</code>) as the item ID.</li>
+        <li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>, create an OAuth 2.0 Client ID of type "Chrome Extension", using this extension's ID as the item ID.</li>
         <li>Enable the Gmail API for that project.</li>
-        <li>Paste the Client ID into <code>manifest.json</code>'s <code>oauth2.client_id</code> field and reload the extension.</li>
+        <li>Paste the Client ID below and click Connect.</li>
       </ol>
-      <p class="hint">After that, connecting is just the button below — no ID to paste here.</p>
+
+      <label for="gmailClientId">Google OAuth Client ID</label>
+      <input id="gmailClientId" type="text" placeholder="xxxxxxxxxx.apps.googleusercontent.com" autocomplete="off" />
 
       <div class="row" style="gap: 8px; margin-top: 8px;">
         <button id="connectGmailBtn" class="save-btn" type="button" style="width: auto;">Connect Gmail</button>

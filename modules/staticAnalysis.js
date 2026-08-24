@@ -1,15 +1,5 @@
 // modules/staticAnalysis.js
 // Module 5b: Local Static File Analysis.
-// Runs entirely client-side against the ArrayBuffer that fileIntegrity.js
-// already fetched for hashing — no extra network cost. This is the
-// "actually look at the bytes" layer: catches extension spoofing, packed/
-// encrypted payloads, embedded macros, and download-and-execute script
-// patterns that a hash-only check would never see.
-//
-// Deliberately NOT a signature-based antivirus engine — that's not
-// achievable in JS against arbitrary binaries, and pretending otherwise
-// would be dishonest about what this can catch. This is a set of concrete,
-// verifiable structural checks.
 
 import {
   FILE_SIGNATURES,
@@ -17,6 +7,9 @@ import {
   HIGH_ENTROPY_THRESHOLD,
   STATIC_ANALYSIS_MAX_BYTES
 } from "./config.js";
+
+// Standard EICAR anti-malware test signature pattern
+const EICAR_STANDARD_PATTERN = /X5O!P%@AP\[4\\PZX54\(P\^\)7CC\)7\}\$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\$H\+H\*/i;
 
 function bytesToHex(bytes) {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
@@ -44,12 +37,6 @@ function shannonEntropy(bytes) {
   return entropy;
 }
 
-// Zip-based container formats (docx/xlsx/pptx/jar/apk all start with PK..)
-// carry an internal file listing we can peek at without a full unzip
-// implementation: local file headers each start with the same PK\x03\x04
-// signature followed by a filename. Cheap substring scan is good enough to
-// flag "this document contains a macro project" or "this archive contains
-// an executable" without needing a zip library.
 function scanZipEntryNames(buffer) {
   const bytes = new Uint8Array(buffer);
   const text = Array.from(bytes.subarray(0, Math.min(bytes.length, STATIC_ANALYSIS_MAX_BYTES)))
@@ -60,7 +47,8 @@ function scanZipEntryNames(buffer) {
   if (/vbaProject\.bin/i.test(text)) {
     findings.push({ key: "EMBEDDED_MACRO", label: "Contains a VBA macro project (vbaProject.bin)" });
   }
-  const exeInsideArchiveMatch = text.match(/[^\s"'<>]{1,80}\.(exe|scr|bat|cmd|ps1|vbs)\b/i);
+
+  const exeInsideArchiveMatch = text.match(/[^\s"'<>]{1,80}\.(exe|scr|bat|cmd|ps1|vbs|com|pif)\b/i);
   if (exeInsideArchiveMatch) {
     findings.push({ key: "EXECUTABLE_IN_ARCHIVE", label: `Archive contains an executable entry (${exeInsideArchiveMatch[0]})` });
   }
@@ -79,50 +67,56 @@ function scanScriptText(buffer) {
   return findings;
 }
 
-/**
- * @param {ArrayBuffer} buffer - the full downloaded file content
- * @param {{extension: string, category: string}} parsed
- */
 export function runStaticAnalysis(buffer, parsed) {
   if (!buffer || buffer.byteLength === 0) {
-    return { staticAnalysisScore: 55, status: "no_content", findings: [] };
+    return { staticAnalysisScore: 55, status: "no_content", findings: [], reason: "Empty file buffer" };
   }
 
   const findings = [];
-  const detected = detectFileType(buffer);
+  const sampleBytes = new Uint8Array(buffer.slice(0, Math.min(buffer.byteLength, STATIC_ANALYSIS_MAX_BYTES)));
+  const textSample = new TextDecoder("latin1").decode(sampleBytes);
 
-  // 1. Extension spoofing: the actual bytes don't match what the extension claims.
+  // 1. EICAR Antivirus Test Pattern Detection
+  if (EICAR_STANDARD_PATTERN.test(textSample)) {
+    findings.push({
+      key: "EICAR_MALWARE_TEST_PATTERN",
+      severity: "critical",
+      label: "Standard EICAR Anti-Malware Test Signature Detected"
+    });
+  }
+
+  // 2. Extension spoofing check
+  const detected = detectFileType(buffer);
   if (detected && !detected.categories.includes(parsed.category) && parsed.category !== "other") {
     findings.push({
       key: "EXTENSION_MISMATCH",
       severity: "critical",
-      label: `File claims to be .${parsed.extension} (${parsed.category}) but its content signature is ${detected.type}`
+      label: `File claims to be .${parsed.extension} (${parsed.category}) but signature is ${detected.type}`
     });
   }
 
-  // 2. Entropy — only meaningful for formats that should be structured/plain,
-  // not already-compressed formats (archives, media) where high entropy is normal.
+  // 3. Shannon Entropy check
   const entropyRelevant = ["executable", "script", "code", "document"].includes(parsed.category);
   if (entropyRelevant) {
-    const sampleBytes = new Uint8Array(buffer.slice(0, Math.min(buffer.byteLength, STATIC_ANALYSIS_MAX_BYTES)));
     const entropy = shannonEntropy(sampleBytes);
     if (entropy >= HIGH_ENTROPY_THRESHOLD) {
       findings.push({
         key: "HIGH_ENTROPY",
         severity: "warning",
-        label: `Unusually high byte-entropy (${entropy.toFixed(2)}/8.0) for a .${parsed.extension} file — consistent with packing/encryption/obfuscation`
+        label: `High byte-entropy (${entropy.toFixed(2)}/8.0) — possible packed/encrypted content`
       });
     }
   }
 
-  // 3. Zip-based containers (docx/xlsx/pptx/jar/apk/zip) — macro & embedded-executable check.
-  if (detected?.type === "zip_based") {
+  // 4. Archive inspection
+  if (detected?.type === "zip_based" || parsed.category === "archive") {
     for (const f of scanZipEntryNames(buffer)) {
-      findings.push({ key: f.key, severity: "warning", label: f.label });
+      const isCritical = f.key === "EXECUTABLE_IN_ARCHIVE" && ["zip", "rar", "7z"].includes(parsed.extension);
+      findings.push({ key: f.key, severity: isCritical ? "critical" : "warning", label: f.label });
     }
   }
 
-  // 4. Script content pattern scan.
+  // 5. Script pattern scan
   if (["script"].includes(parsed.category) || ["js", "ps1", "vbs", "bat", "cmd", "sh"].includes(parsed.extension)) {
     for (const f of scanScriptText(buffer)) {
       findings.push({ key: f.key, severity: "critical", label: f.label });
@@ -133,13 +127,18 @@ export function runStaticAnalysis(buffer, parsed) {
   const hasWarning = findings.some(f => f.severity === "warning");
 
   let staticAnalysisScore = 95;
-  if (hasCritical) staticAnalysisScore = 5;
+  if (hasCritical) staticAnalysisScore = 0;
   else if (hasWarning) staticAnalysisScore = 45;
 
   return {
     staticAnalysisScore,
     status: findings.length ? "findings" : "clean",
     detectedType: detected?.type || "unknown",
-    findings
+    findings,
+    reason: hasCritical
+      ? findings.find(f => f.severity === "critical")?.label
+      : hasWarning
+      ? findings.find(f => f.severity === "warning")?.label
+      : "Passed static signatures and structural checks"
   };
 }
